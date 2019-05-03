@@ -1,2 +1,44 @@
 ---
+
 # tasks file for hmpps-delius-oracledb-ha
+
+- name: (main) Load in our vars
+  include_vars:
+    file: main.yml
+  no_log: true
+  tags: always
+
+- name: (main) Get our ec2 instance facts
+  ec2_metadata_facts: 
+  register: ec2_metadata_facts
+  no_log: true
+  tags: always
+  
+- name: (main) Set standby configuration parameters
+  block:
+    - name: (main) Execute 
+      include: set-standby-config.yml
+  when: inventory_hostname in groups[ standby ]
+  tags: stand
+
+- name: (main) Setup primary
+  block:
+    - name: (main) Configuration parameters
+      include: set-primary-config.yml
+    - name: (main) Database parameters
+      include: set-primary-params.yml
+  when: inventory_hostname in groups[ primary ]
+  tags: prim
+
+- name: (main) Restore primary to standby
+  include: restore-primary-to-standby.yml
+  tags: restore
+
+- name: (main) Configure Oracle data guard broker
+  include: set-primary-dgbroker.yml
+  when: inventory_hostname in groups[ primary ]
+  tags: dg
+
+- name: (main) Setup taf service name
+  include: set-taf-service.yml
+  tags: taf

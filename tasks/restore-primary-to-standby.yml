@@ -1,0 +1,35 @@
+
+- name: (main/restore-primary-to-standby) Fetch primary orapwfile to locahost
+  fetch: 
+    src: "{{ database_primary_orapwfile}}"
+    dest: "/tmp/"
+    flat: yes
+  when: inventory_hostname in groups[primary]
+
+- name: (main/restore-primary-to_standby) 
+  block:
+
+    - name: (main/restore-primary-to-standby) Copy primary orapw file from localhost to standby
+      copy: 
+        src: "/tmp/orapw{{ database_primary_sid_name }}"
+        dest: "{{ oracle_database_oracle_home }}/dbs/orapw{{ database_standby_sid }}"
+        owner: "{{ rdbms_service_user.name }}"
+        group: "{{ rdbms_service_user.group }}"
+        mode: 0640
+ 
+    - name: (main/restore-primary-to-standby) Copy rman restore bash script to standby
+      copy:
+        src: "{{ role_path}}/files/rman_duplicate_to_standby.sh"
+        dest: "/tmp/rman_duplicate_to_standby.sh"
+        mode: 0744
+      become: true
+      become_user: "{{ rdbms_service_user.name }}"
+
+    - name: (main/restore-primary-to-standby) Run rman restore bash script
+      shell: ". ~/.bash_profile; /tmp/rman_duplicate_to_standby.sh -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }} -p {{ database_sys_password }} -i {{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg"
+      become: true
+      become_user: "{{ rdbms_service_user.name }}"
+      register: restore_result
+      failed_when: restore_result.rc != 0
+
+  when: inventory_hostname in groups[standby]
