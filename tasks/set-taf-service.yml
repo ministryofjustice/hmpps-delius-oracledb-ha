@@ -1,0 +1,47 @@
+- name: (main/set-taf-service) Set database unique names depending on hostname
+  block:
+
+    - set_fact: 
+        db_unique_name: "{{ database_primary_unique_name }}"
+      when: inventory_hostname in groups[primary]
+
+    - set_fact: 
+        db_unique_name: "{{ database_standby_unique_name }}"
+      when: inventory_hostname in groups[standby]
+
+    - name: (main/set-taf-service) Add service {{ database_taf_service_name }}
+      shell: |
+        PATH=$PATH:/usr/local/bin 
+        ORAENV_ASK=NO
+        ORACLE_SID=+ASM
+        . oraenv
+        srvctl status service -d {{ db_unique_name }} -s {{ database_taf_service_name }} > /dev/null
+        if [ $? -ne 0 ]
+        then
+          srvctl add service -d {{ db_unique_name }} -s {{ database_taf_service_name }} -l PRIMARY
+          if [ $? -eq 0 ]
+          then
+            echo "Added {{ database_taf_service_name }} to {{ db_unique_name }}"
+          else
+            echo "Error adding {{ database_taf_service_name }} to {{ db_unique_name }}"
+            exit 1
+          fi
+          STARTRESULT=`srvctl start service -d {{ db_unique_name }} -s {{ database_taf_service_name }}`
+          if [ $? -ne 0 ]
+          then 
+            echo ${STARTRESULT} | grep "INTERMEDIATE state on server" > /dev/null
+            if [ $? -ne 0 ] 
+            then
+              echo "Issue starting service"
+              exit 1
+            fi
+          fi
+          echo "Started {{ database_taf_service_name }}" 
+        else
+          echo "Service {{ database_taf_service_name }} already configured"
+        fi
+      become: true
+      become_user: "{{ rdbms_service_user.name }}"
+      register: service_add
+      failed_when: service_add.rc !=0
+  when: inventory_hostname in groups[standby] or inventory_hostname in groups[primary]

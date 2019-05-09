@@ -1,0 +1,13 @@
+[misboe_primarydb]
+misboe-db-1.mis-test.delius.probation.hmpps.dsd.io
+
+[misboe_standbydb1]
+misboe-db-2.mis-test.delius.probation.hmpps.dsd.io
+
+[misboe_standbydb2]
+misboe-db-3.mis-test.delius.probation.hmpps.dsd.io
+
+[misboe_dbs:children]
+misboe_primarydb
+misboe_standbydb1
+misboe_standbydb2

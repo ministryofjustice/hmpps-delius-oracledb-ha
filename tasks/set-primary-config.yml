@@ -1,0 +1,49 @@
+- name: (main/set-primary-config) Add standby's to primary tnsnames 
+  blockinfile:
+    backup:
+    insertafter: EOF
+    path: '{{ oracle_database_oracle_home }}/network/admin/tnsnames.ora'  
+    block: |
+
+      {{ database_standby_unique_name }} =
+      (DESCRIPTION =
+        (ADDRESS = (PROTOCOL = TCP)(HOST = {{ standby_host }})(PORT = 1521))
+          (CONNECT_DATA = 
+            (SERVER = DEDICATED) 
+            (SERVICE_NAME = {{ database_standby_unique_name }})
+          )
+        )
+
+    owner: "{{ rdbms_service_user.name }}"
+    group: "{{ rdbms_service_user.group }}"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK ADD STANDBY {{ database_standby_unique_name }}"
+
+- name: (main/set-primary-config) Setup primary listener
+  blockinfile: 
+    path: '{{ oracle_grid_oracle_home }}/network/admin/listener.ora'
+    block: |
+
+     SID_LIST_LISTENER=
+      (SID_LIST =
+        (SID_DESC =
+          (GLOBAL_DBNAME = {{ database_primary_unique_name }})
+          (ORACLE_HOME = {{ oracle_database_oracle_home }})
+          (SID_NAME = {{ database_primary_sid }})
+        )
+        (SID_DESC=
+          (GLOBAL_DBNAME = {{ database_primary_unique_name }}_DGMGRL)
+          (ORACLE_HOME = {{ oracle_database_oracle_home }})
+          (SID_NAME = {{ database_primary_sid }})
+        )
+      )
+    owner: "{{ rdbms_service_user.name }}"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK PRIMARY SERVICE NAMES"
+  register: primary_listener
+
+- name: (main/set-primary-config) Stop/Start primary listener
+  shell: "export PATH=/usr/sbin:/usr/local/bin:$PATH; export ORAENV_ASK=NO; export ORACLE_SID=+ASM; . oraenv; srvctl stop listener -l LISTENER; srvctl start listener -l LISTENER"
+  become: true
+  become_user: "{{ rdbms_service_user.name }}"
+  register: listener_result
+  failed_when: listener_result.rc !=0
+  when: primary_listener.changed

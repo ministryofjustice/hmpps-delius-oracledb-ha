@@ -1,0 +1,16 @@
+---
+
+- name: (main/set-primary-params) Copy setup primary bash script
+  copy:
+    src: "{{ role_path}}/files/setup_primary_for_ha.sh"
+    dest: "/tmp/setup_primary_for_ha.sh"
+    mode: 0744
+  become: true
+  become_user: "{{ rdbms_service_user.name }}"
+
+- name: (main/set-primary-params) Run script set primary database params
+  shell: ". ~/.bash_profile; /tmp/setup_primary_for_ha.sh -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }}"
+  become: true
+  become_user: "{{ rdbms_service_user.name }}"
+  register: param_result
+  failed_when: param_result.rc != 0
