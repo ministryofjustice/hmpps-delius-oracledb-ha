@@ -137,6 +137,12 @@ EOF
 
  }
 
+configure_rman () {
+  rman target / <<EOF
+    CONFIGURE ARCHIVELOG DELETION POLICY TO APPLIED ON STANDBY;
+EOF
+}
+
 # ------------------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------------------
@@ -158,12 +164,11 @@ info "Retrieving arguments"
 
 TARGETDB=UNSPECIFIED
 
-while getopts "t:s:p:i:" opt
+while getopts "t:s:i:" opt
 do
   case $opt in
     t) PRIMARYDB=$OPTARG ;;
     s) STANDBYDB=$OPTARG ;;
-    p) SYSPASS=$OPTARG ;;
     i) PARAMFILE=$OPTARG ;;
     *) usage ;;
   esac
@@ -204,5 +209,7 @@ else
   # Perform recovery
   perform_recovery
 
+  # Configure RMAN
+  configure_rman
 fi
 info "End"
