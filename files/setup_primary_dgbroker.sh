@@ -18,11 +18,10 @@ usage () {
   echo ""
   echo "Usage:"
   echo ""
-  echo "  $THISSCRIPT -t <primary db> -s <standby db> -p <sys password>"
+  echo "  $THISSCRIPT -t <primary db> -s <standby db>"
   echo ""
   echo "  primary db              = primary database name"
   echo "  standby db              = standby database name"
-  echo "  sys password            = database sys password"
   echo ""
   exit 1
 }
@@ -62,8 +61,23 @@ EOF
   [ $? -ne 0 ] && error "Creating dgbroker configuration" || info "Created ${prefix}_dg_config dgbroker configuration"
 }
 
+lookup_db_user () {
+
+  INSTANCE_ID=`wget -q -O - http://169.254.169.254/latest/meta-data/instance-id`
+  REGION=`wget -q -O - http://169.254.169.254/latest/meta-data/placement/availability-zone | sed 's/.$//'`
+  ENVIRONMENTNAME=`aws ec2 describe-tags --filters "Name=resource-id,Values=${INSTANCE_ID}" "Name=key,Values=environment-name" --region ${REGION} | jq -r '.Tags[].Value'`
+  APPLICATION=`aws ec2 describe-tags --filters "Name=resource-id,Values=${INSTANCE_ID}" "Name=key,Values=application" --region ${REGION} | jq -r '.Tags[].Value'`
+  NAME=`aws ec2 describe-tags --filters "Name=resource-id,Values=${INSTANCE_ID}" "Name=key,Values=Name" --region ${REGION} | jq -r '.Tags[].Value'`
+  DATABASE="`echo $NAME | sed -e s/^${ENVIRONMENTNAME}-// -e s/-.*//`-database"
+  SSMNAME="/${ENVIRONMENTNAME}/${APPLICATION}/${DATABASE}/db/oradb_sys_password"
+  SYSPASS=`aws ssm get-parameters --region ${REGION} --with-decryption --name ${SSMNAME} | jq -r '.Parameters[].Value'`
+
+}
+
 add_standby_to_dgbroker () {
   info "Add ${standbydb} to dgbroker configuration"
+  info " Lookup sys password"
+  lookup_db_user
   dgmgrl /  <<EOF
     add database ${standbydb} as connect identifier is ${standbydb} maintained as physical;
     enable database ${standbydb};
@@ -96,12 +110,11 @@ info "Retrieving arguments"
 
 TARGETDB=UNSPECIFIED
 
-while getopts "t:s:p:" opt
+while getopts "t:s:" opt
 do
   case $opt in
     t) PRIMARYDB=$OPTARG ;;
     s) STANDBYDB=$OPTARG ;;
-    p) SYSPASS=$OPTARG ;; 
     *) usage ;;
   esac
 done
