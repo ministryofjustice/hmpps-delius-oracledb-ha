@@ -47,6 +47,19 @@ startup_mount_standby() {
 EOF
 }
 
+lookup_db_user () {
+
+  INSTANCE_ID=`wget -q -O - http://169.254.169.254/latest/meta-data/instance-id`
+  REGION=`wget -q -O - http://169.254.169.254/latest/meta-data/placement/availability-zone | sed 's/.$//'`
+  ENVIRONMENTNAME=`aws ec2 describe-tags --filters "Name=resource-id,Values=${INSTANCE_ID}" "Name=key,Values=environment-name" --region ${REGION} | jq -r '.Tags[].Value'`
+  APPLICATION=`aws ec2 describe-tags --filters "Name=resource-id,Values=${INSTANCE_ID}" "Name=key,Values=application" --region ${REGION} | jq -r '.Tags[].Value'`
+  NAME=`aws ec2 describe-tags --filters "Name=resource-id,Values=${INSTANCE_ID}" "Name=key,Values=Name" --region ${REGION} | jq -r '.Tags[].Value'`
+  DATABASE="`echo $NAME | sed -e s/^${ENVIRONMENTNAME}-// -e s/-.*//`-database"
+  SSMNAME="/${ENVIRONMENTNAME}/${APPLICATION}/${DATABASE}/db/oradb_sys_password"
+  SYSPASS=`aws ssm get-parameters --region ${REGION} --with-decryption --name ${SSMNAME} | jq -r '.Parameters[].Value'`
+
+}
+
 rman_duplicate_to_standby () {
 
   echo "run"                                                                > $RMANCMDFILE
@@ -73,6 +86,7 @@ rman_duplicate_to_standby () {
   echo "  nofilenamecheck;" >> $RMANCMDFILE
   echo "}" >> $RMANCMDFILE
 
+  lookup_db_user
   rman target sys/${SYSPASS}@${PRIMARYDB} auxiliary sys/${SYSPASS}@${STANDBYDB} cmdfile $RMANCMDFILE log $RMANLOGFILE << EOF
 EOF
 
