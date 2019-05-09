@@ -13,7 +13,7 @@
   register: ec2_metadata_facts
   no_log: true
   tags: always
-  
+
 - name: (main) Set standby configuration parameters
   block:
     - name: (main) Execute 

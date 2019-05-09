@@ -71,6 +71,13 @@ EOF
     alter system set fal_client='${primarydb}' scope=both;
     alter system set standby_file_management=auto scope=both;
 EOF
+
+    rman target / << EOF
+      CONFIGURE RETENTION POLICY TO REDUNDANCY 2;
+      CONFIGURE CONTROLFILE AUTOBACKUP ON;
+      CONFIGURE CONTROLFILE AUTOBACKUP FORMAT FOR DEVICE TYPE 'SBT_TAPE' TO '%F';
+      CONFIGURE ARCHIVELOG DELETION POLICY TO APPLIED ON ALL STANDBY BACKED UP 1 TIMES TO 'SBT_TAPE';
+EOF
 }
 
 create_standby_logfiles () {
@@ -79,10 +86,10 @@ create_standby_logfiles () {
   set head off pages 1000 feed off
   declare
     cursor c1 is
-      select 'alter database add standby logfile thread 1 group '||rn||' size '||bytes cmd
+      select 'alter database add standby logfile thread 1 group '||rn||' size '||mb cmd
       from ( with maxgroup as
-            (select max(group#) as mr from v\$log)
-             select mr, rownum as rn
+            (select max(group#) as mr, max(bytes) as mb from v\$log)
+             select mr, mb, rownum as rn
              from maxgroup
              connect by level <= ((2*mr)+1))
       where rn > mr

@@ -26,7 +26,7 @@
       become_user: "{{ rdbms_service_user.name }}"
 
     - name: (main/restore-primary-to-standby) Run rman restore bash script
-      shell: ". ~/.bash_profile; /tmp/rman_duplicate_to_standby.sh -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }} -p {{ database_sys_password }} -i {{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg"
+      shell: ". ~/.bash_profile; /tmp/rman_duplicate_to_standby.sh -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }} -i {{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg"
       become: true
       become_user: "{{ rdbms_service_user.name }}"
       register: restore_result
