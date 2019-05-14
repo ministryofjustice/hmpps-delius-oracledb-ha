@@ -12,13 +12,6 @@ database_taf_service_name: "{{ hostvars[groups[primary][0]]['database_taf_servic
 database_primary_unique_name: "{{ hostvars[groups[primary][0]]['database_primary_unique'] }}"
 database_primary_sid_name: "{{ hostvars[groups[primary][0]]['database_primary_sid'] }}"
 
-# oracle-database
-oracle_database_oracle_home: "/u01/app/oracle/product/11.2.0.4/db"
-oracle_grid_oracle_home: "/u01/app/grid/product/11.2.0.4/grid"
-
-# Files
-database_primary_orapwfile: "{{ oracle_database_oracle_home }}/dbs/orapw{{ database_primary_sid_name }}"
-
 rdbms_service_user:
   name: oracle
   group: oinstall

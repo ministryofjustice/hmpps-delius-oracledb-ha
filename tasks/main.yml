@@ -14,10 +14,24 @@
   no_log: true
   tags: always
 
-- name: (main) Set standby configuration parameters
+- name: (main) Set up oracle specific variables
   block:
-    - name: (main) Execute 
-      include: set-standby-config.yml
+    - name: (main) Set up oracle grid home
+      register: grid_home
+      shell: "grep +ASM /etc/oratab | cut -d: -f2"
+      run_once: True
+    - name: (main) Set up oracle database home
+      register: oracle_home
+      shell: "grep {{ database_primary_sid_name}} /etc/oratab | cut -d: -f2"
+      run_once: True
+    - set_fact:
+        oracle_database_oracle_home: "{{ oracle_home.stdout }}"
+        oracle_grid_oracle_home: "{{ grid_home.stdout }}"
+        database_primary_orapwfile: "{{ oracle_home.stdout }}/dbs/orapw{{ database_primary_sid_name }}"
+  tags: var
+
+- name: (main) Set standby configuration parameters
+  include: set-standby-config.yml
   when: inventory_hostname in groups[ standby ]
   tags: stand
 
