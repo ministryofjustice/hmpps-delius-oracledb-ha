@@ -90,12 +90,12 @@ create_standby_logfiles () {
   declare
     cursor c1 is
       select 'alter database add standby logfile thread 1 group '||rn||' size '||mb cmd
-      from ( with maxgroup as
-            (select max(group#) as mr, max(bytes) as mb from v\$log)
-             select mr, mb, rownum as rn
-             from maxgroup
-             connect by level <= ((2*mr)+1))
-      where rn > mr
+          from ( with maxgroup as
+                (select count(*) as cnt, max(group#) as mg, max(bytes) as mb from v\$log)
+                 select cnt, mg, mb, rownum as rn
+                 from maxgroup
+                 connect by level <= ((mg)+(cnt)+1))
+      where rn > mg
       and rn not in (select group# from v\$standby_log);
 
       sql_stmt varchar2(400);
