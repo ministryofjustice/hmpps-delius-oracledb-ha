@@ -48,6 +48,7 @@ EOF
 }
 
 create_dgbroker_configuration () {
+  SYSPASS=d3l1u5ag41n
   prefix=`echo ${PRIMARYDB: (-3)} | tr '[:upper:]' '[:lower:]'`
   info "Create dgbroker configuration"
   dgmgrl /  <<EOF
@@ -61,23 +62,30 @@ EOF
   [ $? -ne 0 ] && error "Creating dgbroker configuration" || info "Created ${prefix}_dg_config dgbroker configuration"
 }
 
-lookup_db_user () {
+lookup_db_sys_password() {
 
-  INSTANCE_ID=`wget -q -O - http://169.254.169.254/latest/meta-data/instance-id`
-  REGION=`wget -q -O - http://169.254.169.254/latest/meta-data/placement/availability-zone | sed 's/.$//'`
-  ENVIRONMENTNAME=`aws ec2 describe-tags --filters "Name=resource-id,Values=${INSTANCE_ID}" "Name=key,Values=environment-name" --region ${REGION} | jq -r '.Tags[].Value'`
-  APPLICATION=`aws ec2 describe-tags --filters "Name=resource-id,Values=${INSTANCE_ID}" "Name=key,Values=application" --region ${REGION} | jq -r '.Tags[].Value'`
-  NAME=`aws ec2 describe-tags --filters "Name=resource-id,Values=${INSTANCE_ID}" "Name=key,Values=Name" --region ${REGION} | jq -r '.Tags[].Value'`
-  DATABASE="`echo $NAME | sed -e s/^${ENVIRONMENTNAME}-// -e s/-.*//`-database"
-  SSMNAME="/${ENVIRONMENTNAME}/${APPLICATION}/${DATABASE}/db/oradb_sys_password"
+ info "Looking up passwords to in aws ssm parameter to restore by sourcing /etc/environment"
+  . /etc/environment
+
+  PRODUCT=`echo $HMPPS_ROLE | cut -d- -f1`
+  SSMNAME="/${HMPPS_ENVIRONMENT}/${APPLICATION}/${PRODUCT}-database/db/oradb_sys_password"
   SYSPASS=`aws ssm get-parameters --region ${REGION} --with-decryption --name ${SSMNAME} | jq -r '.Parameters[].Value'`
+  if [ -z ${SYSPASS} ]
+  then
+    if [ "$PRODUCT" = "delius" ]
+    then
+      SSMNAME="/${HMPPS_ENVIRONMENT}/${APPLICATION}/oracle-database/db/oradb_sys_password"
+      SYSPASS=`aws ssm get-parameters --region ${REGION} --with-decryption --name ${SSMNAME} | jq -r '.Parameters[].Value'`
+    fi
+  fi
+  [ -z ${SYSPASS} ] && echo  "Password for sys in aws parameter store ${SSMNAME} does not exist"
 
 }
 
 add_standby_to_dgbroker () {
   info "Add ${standbydb} to dgbroker configuration"
   info " Lookup sys password"
-  lookup_db_user
+  lookup_db_sys_password
   dgmgrl /  <<EOF
     add database ${standbydb} as connect identifier is ${standbydb} maintained as physical;
     enable database ${standbydb};
