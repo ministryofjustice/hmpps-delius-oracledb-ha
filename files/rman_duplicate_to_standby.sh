@@ -47,16 +47,23 @@ startup_mount_standby() {
 EOF
 }
 
-lookup_db_user () {
+lookup_db_sys_password() {
 
-  INSTANCE_ID=`wget -q -O - http://169.254.169.254/latest/meta-data/instance-id`
-  REGION=`wget -q -O - http://169.254.169.254/latest/meta-data/placement/availability-zone | sed 's/.$//'`
-  ENVIRONMENTNAME=`aws ec2 describe-tags --filters "Name=resource-id,Values=${INSTANCE_ID}" "Name=key,Values=environment-name" --region ${REGION} | jq -r '.Tags[].Value'`
-  APPLICATION=`aws ec2 describe-tags --filters "Name=resource-id,Values=${INSTANCE_ID}" "Name=key,Values=application" --region ${REGION} | jq -r '.Tags[].Value'`
-  NAME=`aws ec2 describe-tags --filters "Name=resource-id,Values=${INSTANCE_ID}" "Name=key,Values=Name" --region ${REGION} | jq -r '.Tags[].Value'`
-  DATABASE="`echo $NAME | sed -e s/^${ENVIRONMENTNAME}-// -e s/-.*//`-database"
-  SSMNAME="/${ENVIRONMENTNAME}/${APPLICATION}/${DATABASE}/db/oradb_sys_password"
+ info "Looking up passwords to in aws ssm parameter to restore by sourcing /etc/environment"
+  . /etc/environment
+
+  PRODUCT=`echo $HMPPS_ROLE | cut -d- -f1`
+  SSMNAME="/${HMPPS_ENVIRONMENT}/${APPLICATION}/${PRODUCT}-database/db/oradb_sys_password"
   SYSPASS=`aws ssm get-parameters --region ${REGION} --with-decryption --name ${SSMNAME} | jq -r '.Parameters[].Value'`
+  if [ -z ${SYSPASS} ]
+  then
+    if [ "$PRODUCT" = "delius" ]
+    then
+      SSMNAME="/${HMPPS_ENVIRONMENT}/${APPLICATION}/oracle-database/db/oradb_sys_password"
+      SYSPASS=`aws ssm get-parameters --region ${REGION} --with-decryption --name ${SSMNAME} | jq -r '.Parameters[].Value'`
+    fi
+  fi
+  [ -z ${SYSPASS} ] && echo  "Password for sys in aws parameter store ${SSMNAME} does not exist"
 
 }
 
@@ -86,7 +93,7 @@ rman_duplicate_to_standby () {
   echo "  nofilenamecheck;" >> $RMANCMDFILE
   echo "}" >> $RMANCMDFILE
 
-  lookup_db_user
+  lookup_db_sys_password
   rman target sys/${SYSPASS}@${PRIMARYDB} auxiliary sys/${SYSPASS}@${STANDBYDB} cmdfile $RMANCMDFILE log $RMANLOGFILE << EOF
 EOF
 
