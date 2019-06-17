@@ -52,7 +52,7 @@ lookup_db_sys_password() {
  info "Looking up passwords to in aws ssm parameter to restore by sourcing /etc/environment"
   . /etc/environment
 
-  PRODUCT=`echo $HMPPS_ROLE | cut -d- -f1`
+  PRODUCT=`echo $HMPPS_ROLE`
   SSMNAME="/${HMPPS_ENVIRONMENT}/${APPLICATION}/${PRODUCT}-database/db/oradb_sys_password"
   SYSPASS=`aws ssm get-parameters --region ${REGION} --with-decryption --name ${SSMNAME} | jq -r '.Parameters[].Value'`
   if [ -z ${SYSPASS} ]
@@ -82,7 +82,7 @@ rman_duplicate_to_standby () {
   echo "    spfile parameter_value_convert ('${primarydb}','${standbydb}')" >> $RMANCMDFILE
   echo "          set db_unique_name='${standbydb}'"                        >> $RMANCMDFILE
   echo "          set fal_server='${primarydb}'"                            >> $RMANCMDFILE
-  echo "          set fal_client='${standbydb}'"                            >> $RMANCMDFILE    
+  echo "          set fal_client='${standbydb}'"                            >> $RMANCMDFILE
   echo "          set audit_file_dest='/u01/app/oracle/admin/${standbydb}/adump'" >> $RMANCMDFILE
   echo "          set log_archive_dest_1='location=use_db_recovery_file_dest valid_for=(all_logfiles, all_roles) db_unique_name=${standbydb}'" >> $RMANCMDFILE
   echo "          set log_archive_dest_2=''"   >> $RMANCMDFILE
@@ -106,10 +106,10 @@ EOF
 perform_recovery () {
   info "Check standby recovery"
   sqlplus -s / as sysdba << EOF
-	  alter database open read only;
-	  alter database close;
+    alter database open read only;
+    alter database close;
     alter database flashback on;
-	  alter database recover managed standby database using current logfile disconnect;
+    alter database recover managed standby database using current logfile disconnect;
     exit;
 EOF
   [ $? -ne 0 ] && error "Recovering the standby" || info "Standby ${STANDBYDB} now recovering"
