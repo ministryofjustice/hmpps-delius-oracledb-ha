@@ -48,7 +48,7 @@ EOF
 }
 
 create_dgbroker_configuration () {
-  SYSPASS=d3l1u5ag41n
+  lookup_db_sys_password
   prefix=`echo ${PRIMARYDB: (-3)} | tr '[:upper:]' '[:lower:]'`
   info "Create dgbroker configuration"
   dgmgrl /  <<EOF
