@@ -67,7 +67,7 @@ lookup_db_sys_password() {
  info "Looking up passwords to in aws ssm parameter to restore by sourcing /etc/environment"
   . /etc/environment
 
-  PRODUCT=`echo $HMPPS_ROLE | cut -d- -f1`
+  PRODUCT=`echo $HMPPS_ROLE`
   SSMNAME="/${HMPPS_ENVIRONMENT}/${APPLICATION}/${PRODUCT}-database/db/oradb_sys_password"
   SYSPASS=`aws ssm get-parameters --region ${REGION} --with-decryption --name ${SSMNAME} | jq -r '.Parameters[].Value'`
   if [ -z ${SYSPASS} ]
