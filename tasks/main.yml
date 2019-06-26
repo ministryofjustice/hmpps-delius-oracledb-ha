@@ -8,11 +8,23 @@
   no_log: true
   tags: always
 
+- name: (main) Debug vars
+  debug:
+    msg: "{{ vars }}"
+    verbosity: 2
+  tags: debug
+
 - name: (main) Get our ec2 instance facts
-  ec2_metadata_facts: 
+  ec2_metadata_facts:
   register: ec2_metadata_facts
   no_log: true
   tags: always
+
+- name: (main) Debug ec2_metadata_facts
+  debug:
+    msg: "{{ ec2_metadata_facts }}"
+    verbosity: 2
+  tags: debug
 
 - name: (main) Set up oracle specific variables
   block:
