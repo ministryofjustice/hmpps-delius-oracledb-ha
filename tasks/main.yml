@@ -8,8 +8,13 @@
   no_log: true
   tags: always
 
+- name: (main) Debug vars
+  debug:
+    msg: "{{ vars }}"
+  tags: debug
+
 - name: (main) Get our ec2 instance facts
-  ec2_metadata_facts: 
+  ec2_metadata_facts:
   register: ec2_metadata_facts
   no_log: true
   tags: always

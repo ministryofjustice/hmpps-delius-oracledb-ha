@@ -70,7 +70,7 @@ lookup_db_sys_password() {
   PRODUCT=`echo $HMPPS_ROLE`
   SSMNAME="/${HMPPS_ENVIRONMENT}/${APPLICATION}/${PRODUCT}-database/db/oradb_sys_password"
   SYSPASS=`aws ssm get-parameters --region ${REGION} --with-decryption --name ${SSMNAME} | jq -r '.Parameters[].Value'`
-  [ -z ${SYSPASS} ] && echo  "Password for sys in aws parameter store ${SSMNAME} does not exist"
+  [ -z ${SYSPASS} ] && error "Password for sys in aws parameter store ${SSMNAME} does not exist"
 
 }
 
