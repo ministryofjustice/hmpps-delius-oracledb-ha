@@ -4,7 +4,7 @@ PATH=$PATH:/usr/sbin:/usr/local/bin
 THISSCRIPT=`basename $0`
 RMANCMDFILE=/tmp/rmanduplicatestandby.cmd
 RMANLOGFILE=/tmp/rmanduplicatestandby.log
-CPU_COUNT=`grep processor /proc/cpuinfo | wc -l`
+CPU_COUNT=$((`grep processor /proc/cpuinfo | wc -l`/2))
 
 info () {
   T=`date +"%D %T"`
@@ -63,8 +63,10 @@ rman_duplicate_to_standby () {
 
   echo "run"                                                                > $RMANCMDFILE
   echo "{"                                                                  >> $RMANCMDFILE
-  echo "  allocate channel ch1 device type disk;"                           >> $RMANCMDFILE
-  echo "  allocate channel ch2 device type disk;"                           >> $RMANCMDFILE  
+  for (( i=1; i<=${CPU_COUNT}; i++ ))
+  do
+    echo "  allocate channel ch${i} device type disk;"                      >> $RMANCMDFILE
+  done
   for (( i=1; i<=${CPU_COUNT}; i++ ))
   do
     echo "  allocate auxiliary channel drch${i} device type disk;"          >> $RMANCMDFILE
