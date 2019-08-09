@@ -63,9 +63,11 @@ rman_duplicate_to_standby () {
 
   echo "run"                                                                > $RMANCMDFILE
   echo "{"                                                                  >> $RMANCMDFILE
+  echo "  allocate channel ch1 device type disk;"                           >> $RMANCMDFILE
+  echo "  allocate channel ch2 device type disk;"                           >> $RMANCMDFILE  
   for (( i=1; i<=${CPU_COUNT}; i++ ))
   do
-    echo "  allocate auxiliary channel ch${i} device type disk;"            >> $RMANCMDFILE
+    echo "  allocate auxiliary channel drch${i} device type disk;"          >> $RMANCMDFILE
   done
   echo "  duplicate target database"                                        >> $RMANCMDFILE
   echo "   for standby"                                                     >> $RMANCMDFILE
