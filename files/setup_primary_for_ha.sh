@@ -36,9 +36,63 @@ set_ora_env () {
   export NLS_DATE_FORMAT=YYMMDDHH24MI
 }
 
+set_system_param () {
+   PARAM_NAME=$1
+   PARAM_VALUE=$2
+   X=`sqlplus -s / as sysdba <<EOF
+      set feedback off heading off echo off verify off
+      col value format a1000
+      set lines 1000
+      set long 1000
+      select 'ACTUAL_VALUE="'||value||'"' value
+        from $V_PARAMETER
+       where name = '${PARAM_NAME}';
+EOF
+`
+   eval $X
+   if [ "$ACTUAL_VALUE" != "$PARAM_VALUE" ];
+   then
+      info "Setting ${PARAM_NAME} to ${PARAM_VALUE}"
+      sqlplus -s / as sysdba << EOF
+      set feedback off heading off echo off verify off
+      alter system set ${PARAM_NAME}='${PARAM_VALUE}' scope=both;
+      exit;
+EOF
+   fi
+}
+
+set_rman_param () {
+  PARAM_NAME=$1
+  PARAM_VALUE=$2
+
+  X=`rman target / <<EOF
+    SHOW ALL;
+EOF
+`
+  # Special case for CONTROLFILE AUTOBACKUP as this parameter name is substring of CONTROLFILE AUTOBACKUP FORMAT
+  if [ "$PARAM_NAME" == "CONTROLFILE AUTOBACKUP" ];
+  then
+    ACTUAL_VALUE=$(echo $X | sed "s/^.*CONFIGURE \(CONTROLFILE AUTOBACKUP \(ON\|OFF\)\)\s*;.*$/\1/")
+  else
+    ACTUAL_VALUE=$(echo $X | sed "s/^.*CONFIGURE \(${PARAM_NAME}[^;]*\);.*$/\1/")
+  fi
+
+  if [ "$ACTUAL_VALUE" != "$PARAM_NAME $PARAM_VALUE" ];
+  then
+    info "Setting RMAN $PARAM_NAME $PARAM_VALUE"
+    rman target / <<EOF >/dev/null
+      CONFIGURE $PARAM_NAME $PARAM_VALUE;
+      exit
+EOF
+  fi     
+}
+
+
 configure_primary_for_ha () {
   set_ora_env ${PRIMARYDB}
   V_DATABASE=v\$database
+  V_PARAMETER=v\$parameter
+  V_ARCHIVE_DEST=v\$archive_dest
   X=`sqlplus -s / as sysdba <<EOF
      set feedback off heading off echo off verify off
      select 'LOG_MODE='||log_mode,
@@ -51,6 +105,7 @@ EOF
   eval $X
   if [ "$LOG_MODE" != "ARCHIVELOG" ]
   then
+    info "Enabling archive log mode"
     sqlplus -s / as sysdba << EOF
     set feedback off heading off echo off verify off
     shutdown immediate
@@ -61,26 +116,62 @@ EOF
 EOF
   fi
 
+  if [ "$FLASHBACK_ON" != "YES" ]
+  then
+    info "Enabling flashback database"
     sqlplus -s / as sysdba << EOF
-    alter database force logging;
+    set feedback off heading off echo off verify off
     alter database flashback on;
-    alter system set log_archive_dest_1='location=use_db_recovery_file_dest valid_for=(all_logfiles,all_roles) db_unique_name=${primarydb}' scope=both;
-    alter system set log_archive_config='dg_config=(${primarydb},${primarydb}s1,${primarydb}s2)' scope=both;
-    alter system set log_archive_dest_${n}='service=${standbydb} affirm sync valid_for=(online_logfiles,primary_role) db_unique_name=${standbydb}' scope=both;
-    alter system set log_archive_dest_state_${n}=enable scope=both;
-    alter system set fal_server='${primarydb}s1, ${primarydb}s2' scope=both;
-    alter system set fal_client='${primarydb}' scope=both;
-    alter system set standby_file_management=auto scope=both;
+    exit;
 EOF
+  fi
 
-    rman target / << EOF
-      CONFIGURE RETENTION POLICY TO RECOVERY WINDOW OF 14 DAYS;
-      CONFIGURE CONTROLFILE AUTOBACKUP ON;
-      CONFIGURE CONTROLFILE AUTOBACKUP FORMAT FOR DEVICE TYPE 'SBT_TAPE' TO '%F';
-      CONFIGURE DEVICE TYPE 'SBT_TAPE' PARALLELISM 1 BACKUP TYPE TO COMPRESSED BACKUPSET;
-      CONFIGURE ARCHIVELOG DELETION POLICY TO APPLIED ON ALL STANDBY BACKED UP 1 TIMES TO 'SBT_TAPE';
-      CONFIGURE CHANNEL DEVICE TYPE 'SBT_TAPE' PARMS 'SBT_LIBRARY=${ORACLE_HOME}/lib/libosbws.so, ENV=(OSB_WS_PFILE=${ORACLE_HOME}/dbs/osbws.ora)';
+  if [ "$FORCE_LOGGING" != "YES" ]
+  then
+    info "Enabling force logging"
+    sqlplus -s / as sysdba << EOF
+    set feedback off heading off echo off verify off
+    alter database force logging;
+    exit;
 EOF
+  fi
+
+  #  Set System Parameters
+  set_system_param  log_archive_dest_1            "location=use_db_recovery_file_dest valid_for=(all_logfiles,all_roles) db_unique_name=${primarydb}"
+  set_system_param  log_archive_config            "dg_config=(${primarydb},${primarydb}s1,${primarydb}s2)"
+
+# The log archive destinations may not be set up in ascending order so determine if a destination is already configured for this standby
+  X=`sqlplus -s / as sysdba <<EOF
+     set feedback off heading off echo off verify off
+     select 'DESTINATION_CONFIGURED='||decode(max(dest_name),NULL,'NO','YES'),
+            'DESTINATION_ID='||lower(max(dest_id))
+     from   $V_ARCHIVE_DEST 
+     where  destination='${standbydb}';     
+EOF
+`
+  eval $X
+
+  # If the destination has already been configured then used that destination id, otherwise
+  # use the sequential destination determined in the main section
+  if [ "$DESTINATION_CONFIGURED" == "YES" ];
+  then
+     info "Archive destination for ${STANDBYDB} is already configured on destination ${DESTINATION_ID}"
+     n=${DESTINATION_ID}
+  fi
+  set_system_param  log_archive_dest_${n}         "service=${standbydb} affirm sync valid_for=(online_logfiles,primary_role) db_unique_name=${standbydb}"
+  set_system_param  log_archive_dest_state_${n}   "enable"
+
+  set_system_param  fal_server                    "${primarydb}s1, ${primarydb}s2"
+  set_system_param  fal_client                    "${primarydb}"
+  set_system_param  standby_file_management       "auto"
+
+  # Configure RMAN Parameters
+  set_rman_param "RETENTION POLICY"   "TO RECOVERY WINDOW OF 14 DAYS"
+  set_rman_param "CONTROLFILE AUTOBACKUP"   "ON"
+  set_rman_param "CONTROLFILE AUTOBACKUP FORMAT FOR DEVICE TYPE 'SBT_TAPE'" "TO '%F'"
+  set_rman_param "DEVICE TYPE 'SBT_TAPE'"  "PARALLELISM 1 BACKUP TYPE TO COMPRESSED BACKUPSET"
+  set_rman_param "ARCHIVELOG DELETION POLICY"  "TO APPLIED ON ALL STANDBY BACKED UP 1 TIMES TO 'SBT_TAPE'"
+  set_rman_param "CHANNEL DEVICE TYPE 'SBT_TAPE'"  "PARMS 'SBT_LIBRARY=${ORACLE_HOME}/lib/libosbws.so, ENV=(OSB_WS_PFILE=${ORACLE_HOME}/dbs/osbws.ora)'"
 }
 
 create_standby_logfiles () {
@@ -107,10 +198,11 @@ create_standby_logfiles () {
       execute immediate sql_stmt;
     end loop;
   end;
-  /  
+  /
 EOF
   [ $? -ne 0 ] && error "Creating standby log files" || info "Created standby log files"
 }
+
 
 # ------------------------------------------------------------------------------
 # Main
@@ -155,10 +247,13 @@ standbydb=`echo "${STANDBYDB}" | tr '[:upper:]' '[:lower:]'`
 # Configure log_archive_dest_<n> 
 if [[ ${STANDBYDB} =~ .*S1 ]]
 then
+
    n=2
 elif [[ ${STANDBYDB} =~ .*S2 ]] 
 then
    n=3
+else
+  error "Standby name may only end in S1 or S2"
 fi
 
 # Configure database parameters
@@ -166,3 +261,5 @@ configure_primary_for_ha
 
 # Create redo standby log files they do not exist
 create_standby_logfiles
+
+ 
