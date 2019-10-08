@@ -62,31 +62,21 @@ EOF
 }
 
 set_rman_param () {
-  PARAM_NAME=$1
-  PARAM_VALUE=$2
+  CONFIGURATION=$1
 
   X=`rman target / <<EOF
-    SHOW ALL;
+     SHOW ALL;
 EOF
 `
-  # Special case for CONTROLFILE AUTOBACKUP as this parameter name is substring of CONTROLFILE AUTOBACKUP FORMAT
-  if [ "$PARAM_NAME" == "CONTROLFILE AUTOBACKUP" ];
-  then
-    ACTUAL_VALUE=$(echo $X | sed "s/^.*CONFIGURE \(CONTROLFILE AUTOBACKUP \(ON\|OFF\)\)\s*;.*$/\1/")
-  else
-    ACTUAL_VALUE=$(echo $X | sed "s/^.*CONFIGURE \(${PARAM_NAME}[^;]*\);.*$/\1/")
-  fi
-
-  if [ "$ACTUAL_VALUE" != "$PARAM_NAME $PARAM_VALUE" ];
-  then
-    info "Setting RMAN $PARAM_NAME $PARAM_VALUE"
-    rman target / <<EOF >/dev/null
-      CONFIGURE $PARAM_NAME $PARAM_VALUE;
+   if [ $( echo $X | grep -c "$CONFIGURATION" ) -eq 0  ];
+   then
+    info "Setting RMAN $CONFIGURATION"
+    rman target / <<EOF > /dev/null
+      CONFIGURE $CONFIGURATION;
       exit
 EOF
-  fi     
+   fi
 }
-
 
 configure_primary_for_ha () {
   set_ora_env ${PRIMARYDB}
@@ -166,12 +156,12 @@ EOF
   set_system_param  standby_file_management       "auto"
 
   # Configure RMAN Parameters
-  set_rman_param "RETENTION POLICY"   "TO RECOVERY WINDOW OF 14 DAYS"
-  set_rman_param "CONTROLFILE AUTOBACKUP"   "ON"
-  set_rman_param "CONTROLFILE AUTOBACKUP FORMAT FOR DEVICE TYPE 'SBT_TAPE'" "TO '%F'"
-  set_rman_param "DEVICE TYPE 'SBT_TAPE'"  "PARALLELISM 1 BACKUP TYPE TO COMPRESSED BACKUPSET"
-  set_rman_param "ARCHIVELOG DELETION POLICY"  "TO APPLIED ON ALL STANDBY BACKED UP 1 TIMES TO 'SBT_TAPE'"
-  set_rman_param "CHANNEL DEVICE TYPE 'SBT_TAPE'"  "PARMS 'SBT_LIBRARY=${ORACLE_HOME}/lib/libosbws.so, ENV=(OSB_WS_PFILE=${ORACLE_HOME}/dbs/osbws.ora)'"
+  set_rman_param "RETENTION POLICY TO RECOVERY WINDOW OF 14 DAYS"
+  set_rman_param "CONTROLFILE AUTOBACKUP ON"
+  set_rman_param "CONTROLFILE AUTOBACKUP FORMAT FOR DEVICE TYPE 'SBT_TAPE' TO '%F'"
+  set_rman_param "DEVICE TYPE 'SBT_TAPE' PARALLELISM 1 BACKUP TYPE TO COMPRESSED BACKUPSET"
+  set_rman_param "ARCHIVELOG DELETION POLICY TO APPLIED ON ALL STANDBY BACKED UP 1 TIMES TO 'SBT_TAPE'"
+  set_rman_param "CHANNEL DEVICE TYPE 'SBT_TAPE' PARMS 'SBT_LIBRARY=${ORACLE_HOME}/lib/libosbws.so, ENV=(OSB_WS_PFILE=${ORACLE_HOME}/dbs/osbws.ora)'"
 }
 
 create_standby_logfiles () {
@@ -262,4 +252,4 @@ configure_primary_for_ha
 # Create redo standby log files they do not exist
 create_standby_logfiles
 
- 
+                          
