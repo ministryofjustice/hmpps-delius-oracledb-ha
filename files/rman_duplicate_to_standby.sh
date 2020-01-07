@@ -102,7 +102,6 @@ EOF
 perform_recovery () {
   info "Check standby recovery"
   sqlplus -s / as sysdba << EOF
-    alter database open read only;
     alter database close;
     alter database flashback on;
     alter database recover managed standby database using current logfile disconnect;
