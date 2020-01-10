@@ -19,6 +19,22 @@
   no_log: true
   tags: always
 
+- name: (main) Get the Dependencies Bucket ARN from Primary
+  shell: . /etc/environment; echo $DEPENDENCIES_BUCKET_ARN
+  register: dependencies_bucket_arn
+  changed_when: false
+  delegate_to: "{{ groups[primary][0] }}"
+  when: inventory_hostname in groups[ standby ]
+  tags: stand
+
+- name: (main) Update the Dependency Bucket ARN in Standby Environment File
+  lineinfile:
+    path: /etc/environment
+    regexp: 'export DEPENDENCIES_BUCKET_ARN=".*"'
+    line: export DEPENDENCIES_BUCKET_ARN="{{ dependencies_bucket_arn.stdout }}"
+  when: inventory_hostname in groups[ standby ]
+  tags: stand  
+
 - name: (main) Set up oracle specific variables
   block:
     - name: (main) Set up oracle grid home
