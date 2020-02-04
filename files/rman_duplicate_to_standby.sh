@@ -4,6 +4,7 @@ PATH=$PATH:/usr/sbin:/usr/local/bin
 THISSCRIPT=`basename $0`
 RMANCMDFILE=/tmp/rmanduplicatestandby.cmd
 RMANLOGFILE=/tmp/rmanduplicatestandby.log
+RMANARCCLRLOG=/tmp/rmanarchiveclear.log
 CPU_COUNT=$((`grep processor /proc/cpuinfo | wc -l`/2))
 
 info () {
@@ -145,6 +146,35 @@ configure_rman () {
 EOF
 }
 
+remove_orphaned_archive () {
+  info "Remove orphaned archived redo logs"
+
+  V_PARAMETER=v\$parameter
+  V_INSTANCE=v\$instance
+
+  X=`sqlplus -s / as sysdba <<EOF
+      set feedback off heading off echo off verify off
+      SELECT     'export ARCHIVE_DEST='||p.value||'/'|| i.instance_name||'/archivelog'
+      FROM       $V_PARAMETER   p
+      CROSS JOIN $V_INSTANCE   i
+      WHERE      p.name = 'db_recovery_file_dest';     
+EOF
+  `
+  eval $X
+  [ $? -ne 0 ] && error "Getting archive destination" || info "Got archive destination"
+
+  # As soon as we catalog the recovery destination, the orphaned redo logs
+  # will be automatically removed from ASM by Oracle.  So we simply need to
+  # crosscheck and delete the associated records.
+  rman target / log $RMANARCCLRLOG <<EOF
+      CATALOG START WITH '$ARCHIVE_DEST';
+      CROSSCHECK ARCHIVELOG ALL;
+      DELETE NOPROMPT EXPIRED ARCHIVELOG ALL;
+      exit
+EOF
+  [ $? -ne 0 ] && error "Removing orphaned archivelogs" || info "Removed orphaned archivelogs"
+}
+
 # ------------------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------------------
@@ -213,5 +243,8 @@ else
 
   # Configure RMAN
   configure_rman
+
+  # Remove orphaned archivelogs left by previous incarnation
+  remove_orphaned_archive
 fi
 info "End"
