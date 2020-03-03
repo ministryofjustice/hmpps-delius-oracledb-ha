@@ -28,18 +28,9 @@
           )
         )
 
-      {{ database_standby_unique_name_other }} =
-      (DESCRIPTION =
-        (ADDRESS = (PROTOCOL = TCP)(HOST = {{ standby_host_other }})(PORT = 1521))
-          (CONNECT_DATA = 
-            (SERVER = DEDICATED) 
-            (SERVICE_NAME = {{ database_standby_unique_name_other }})
-          )
-        )
-
     owner: "{{ rdbms_service_user.name }}"
     group: "{{ rdbms_service_user.group }}"
-    marker: "# {mark} ANSIBLE MANAGED BLOCK ADD ALL DATABASES"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK ADD {{ database_standby_unique_name }} DATABASE"
 
 - name: (main/set-standby-config) Setup standby listener 
   blockinfile: 

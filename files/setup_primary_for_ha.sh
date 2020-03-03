@@ -54,8 +54,63 @@ EOF
    then
       info "Setting ${PARAM_NAME} to ${PARAM_VALUE}"
       sqlplus -s / as sysdba << EOF
-      set feedback off heading off echo off verify off
-      alter system set ${PARAM_NAME}='${PARAM_VALUE}' scope=both;
+      set feedback off heading off echo off verify off lines 132
+      declare
+
+      cursor c_fal_server is
+        select value
+        from $V_PARAMETER
+        where name = 'fal_server'
+        and value like '%${PARAM_VALUE}%';
+
+      cursor c_log_archive_config is
+        select value
+        from $V_PARAMETER
+        where name = 'log_archive_config'
+        and value like '%${PARAM_VALUE}%';
+        
+      v_sql_stmt            varchar2(4000);
+      r_fal_server          c_fal_server%rowtype;
+      r_log_archive_config  c_log_archive_config%rowtype;
+
+      begin
+        if '${PARAM_NAME}' = 'fal_server'
+        then
+          open c_fal_server;
+          fetch c_fal_server into r_fal_server;
+          if c_fal_server%notfound
+          then
+            if '${ACTUAL_VALUE}' is not null
+            then          
+              v_sql_stmt:='alter system set ${PARAM_NAME}='||''''||'${ACTUAL_VALUE},${PARAM_VALUE}'||''''||' scope=both';
+            else
+              v_sql_stmt:='alter system set ${PARAM_NAME}='||''''||'${PARAM_VALUE}'||''''||' scope=both';
+            end if;
+          end if;
+          close c_fal_server;
+        elsif '${PARAM_NAME}' = 'log_archive_config'
+        then
+          open c_log_archive_config;
+          fetch c_log_archive_config into r_log_archive_config;
+          if c_log_archive_config%notfound
+          then
+            if '${ACTUAL_VALUE}' is not null
+            then
+          v_sql_stmt:='alter system set ${PARAM_NAME}='||''''||regexp_replace('${ACTUAL_VALUE}','^(dg_config=.*)\)$','\1,${PARAM_VALUE})')||''''||' scope=both';
+            else
+              v_sql_stmt:='alter system set ${PARAM_NAME}='||''''||'dg_config=(${primarydb},${PARAM_VALUE})'||''''||' scope=both';
+            end if;
+          end if;
+          close c_log_archive_config;
+        else
+          v_sql_stmt:='alter system set ${PARAM_NAME}='||''''||'${PARAM_VALUE}'||''''||' scope=both';
+        end if;
+        if v_sql_stmt is not null
+        then
+          execute immediate v_sql_stmt;
+        end if;
+      end;
+      /
       exit;
 EOF
    fi
@@ -128,7 +183,7 @@ EOF
 
   #  Set System Parameters
   set_system_param  log_archive_dest_1            "location=use_db_recovery_file_dest valid_for=(all_logfiles,all_roles) db_unique_name=${primarydb}"
-  set_system_param  log_archive_config            "dg_config=(${primarydb},${primarydb}s1,${primarydb}s2)"
+  set_system_param  log_archive_config            "${standbydb}"
 
 # The log archive destinations may not be set up in ascending order so determine if a destination is already configured for this standby
   X=`sqlplus -s / as sysdba <<EOF
@@ -151,7 +206,7 @@ EOF
   set_system_param  log_archive_dest_${n}         "service=${standbydb} affirm sync valid_for=(online_logfiles,primary_role) db_unique_name=${standbydb}"
   set_system_param  log_archive_dest_state_${n}   "enable"
 
-  set_system_param  fal_server                    "${primarydb}s1, ${primarydb}s2"
+  set_system_param  fal_server                    "${standbydb}"
   set_system_param  fal_client                    "${primarydb}"
   set_system_param  standby_file_management       "auto"
 
