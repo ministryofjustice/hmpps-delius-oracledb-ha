@@ -2,6 +2,15 @@
 
 # tasks file for hmpps-delius-oracledb-ha
 
+- block:
+    - name: (main) Only carry out ha tasks if high availability configured
+      debug:
+        msg: "No high availability database to be configured...exiting"
+    - meta: end_play
+  run_once: True
+  when: high_availability_count is defined and high_availability_count==0
+  tags: var
+
 - name: (main) Load in our vars
   include_vars:
     file: main.yml
