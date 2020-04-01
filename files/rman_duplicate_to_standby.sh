@@ -175,6 +175,36 @@ EOF
   [ $? -ne 0 ] && error "Removing orphaned archivelogs" || info "Removed orphaned archivelogs"
 }
 
+remove_asm_directories () {
+  sleep 10
+  info "Shutdown instance ${STANDBYDB}"
+  sqlplus / as sysdba << EOF
+  shutdown abort;
+EOF
+  [ $? -ne 0 ] && error "Shutting down ${STANDBYDB}"
+
+  set_ora_env +ASM
+
+  for VG in DATA FLASH
+  do
+    info "Remove directory ${STANDBYDB} in ${VG} volume group"
+    asmcmd ls +${VG}/${STANDBYDB} > /dev/null 2>&1
+    if [ $? -eq 0 ]
+    then
+      asmcmd rm -rf +${VG}/${STANDBYDB}
+      [ $? -ne 0 ] && error "Removing directory ${STANDBYDB} in ${VG}"
+    else
+      info "No ${STANDBYDB}directory in ${VG} to delete"
+    fi
+  done
+}
+
+remove_standby_parameter_files () {
+  set_ora_env ${STANDBYDB}
+  ls ${ORACLE_HOME}/dbs/*${STANDBYDB}* | egrep -v "${PARAMFILE}|orapw${STANDBYDB}" | xargs -r rm 
+  [ $? -ne 0 ] && error "Removing standby parameter files"
+}
+
 # ------------------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------------------
@@ -228,6 +258,13 @@ if [ $? -eq 0 ]
 then
   info "${standbydb} already configured in dgbroker, can assume no duplicate required"
 else
+
+  # Shutdown standby instance and remove standby database from DATA and FLASH asm diskgroups
+  remove_asm_directories
+
+  # Remove unneccesary standby parameter files
+  remove_standby_parameter_files
+
   # Startup no mount standby instance for rman duplicate
   startup_mount_standby
 
