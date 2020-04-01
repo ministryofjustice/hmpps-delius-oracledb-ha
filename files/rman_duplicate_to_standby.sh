@@ -42,12 +42,6 @@ set_ora_env () {
   export NLS_DATE_FORMAT=YYMMDDHH24MI
 }
 
-in_sync_with_primary () {
-sqlplus -s / as sysdba << EOF
-  startup nomount pfile='${PARAMFILE}'
-EOF
-}
-
 startup_mount_standby() {
   sqlplus -s / as sysdba << EOF
   startup nomount pfile='${PARAMFILE}'
