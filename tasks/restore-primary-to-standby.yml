@@ -32,4 +32,9 @@
       register: restore_result
       failed_when: restore_result.rc != 0
 
+    - name: (main/restore-primary-to-standby) Print rman restore output
+      debug:
+        var: restore_result.stdout_lines
+        verbosity: 0
+
   when: inventory_hostname in groups[standby]
