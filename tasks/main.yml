@@ -49,7 +49,6 @@
     - name: (main) Set up oracle grid home
       register: grid_home
       shell: "grep +ASM /etc/oratab | cut -d: -f2"
-      run_once: True
     - name: (main) Set up oracle database home
       register: oracle_home
       shell: "grep {{ database_primary_sid_name}} /etc/oratab | cut -d: -f2"
