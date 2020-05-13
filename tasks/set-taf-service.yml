@@ -13,8 +13,8 @@
       shell: |
         PATH=$PATH:/usr/local/bin 
         ORAENV_ASK=NO
-        ORACLE_SID=+ASM
-        . oraenv
+        ORACLE_SID={{ database_primary_sid_name }}
+        . oraenv > /dev/null
         srvctl status service -d {{ db_unique_name }} -s {{ database_taf_service_name }} > /dev/null
         if [ $? -ne 0 ]
         then
