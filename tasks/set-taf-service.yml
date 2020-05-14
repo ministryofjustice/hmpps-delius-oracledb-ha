@@ -9,11 +9,19 @@
         db_unique_name: "{{ database_standby_unique_name }}"
       when: inventory_hostname in groups[standby]
 
+    - set_fact: 
+        db_sid_name: "{{ database_primary_sid_name }}"
+      when: inventory_hostname in groups[primary]
+
+    - set_fact: 
+        db_sid_name: "{{ database_standby_sid_name }}"
+      when: inventory_hostname in groups[standby]
+
     - name: (main/set-taf-service) Add service {{ database_taf_service_name }}
       shell: |
         PATH=$PATH:/usr/local/bin 
         ORAENV_ASK=NO
-        ORACLE_SID={{ database_primary_sid_name }}
+        ORACLE_SID={{ db_sid_name }}
         . oraenv > /dev/null
         srvctl status service -d {{ db_unique_name }} -s {{ database_taf_service_name }} > /dev/null
         if [ $? -ne 0 ]
@@ -44,4 +52,8 @@
       become_user: "{{ rdbms_service_user.name }}"
       register: service_add
       failed_when: service_add.rc !=0
+
+    - debug:
+        var: service_add
+
   when: inventory_hostname in groups[standby] or inventory_hostname in groups[primary]
