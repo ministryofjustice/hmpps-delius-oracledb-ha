@@ -5,6 +5,7 @@
 standby_host: "{{ hostvars[groups[standby][0]]['inventory_hostname'] }}"
 primary_host: "{{ hostvars[groups[primary][0]]['inventory_hostname'] }}"
 database_standby_unique_name: "{{ hostvars[groups[standby][0]]['database_standby_unique'] }}"
+database_standby_sid_name: "{{ hostvars[groups[standby][0]]['database_standby_sid'] }}"
 database_global_database_name: "{{ hostvars[groups[primary][0]]['database_global_database'] }}"
 database_taf_service_name: "{{ hostvars[groups[primary][0]]['database_taf_service'] }}"
 database_primary_unique_name: "{{ hostvars[groups[primary][0]]['database_primary_unique'] }}"
