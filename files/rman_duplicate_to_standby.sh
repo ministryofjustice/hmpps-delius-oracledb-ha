@@ -253,8 +253,13 @@ mkdir -p /u01/app/oracle/admin/${standbydb}/adump
 # Check if standby database configured in dgbroker
 set_ora_env ${STANDBYDB}
 dgmgrl /  "show configuration" | grep "Physical standby database"  | grep "${standbydb}" > /dev/null
+PHYSICAL_STANDBY_CONFIG=$?
 
-if [ $? -eq 0 ]
+# Check if ORA-16700 error code associated with standby (requires rebuild)
+dgmgrl /  "show database ${standbydb}" | grep "ORA-16700: the standby database has diverged from the primary database" > /dev/null
+PHYSICAL_STANDBY_DIVERGENCE=$?
+
+if [ ${PHYSICAL_STANDBY_CONFIG} -eq 0 && ${PHYSICAL_STANDBY_DIVERGENCE} -gt 1 ]
 then
   info "${standbydb} already configured in dgbroker, can assume no duplicate required"
 else
