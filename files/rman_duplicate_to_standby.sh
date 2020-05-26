@@ -183,6 +183,7 @@ remove_asm_directories () {
 EOF
   [ $? -ne 0 ] && error "Shutting down ${STANDBYDB}"
 
+  sleep 10
   set_ora_env +ASM
 
   for VG in DATA FLASH
@@ -259,7 +260,7 @@ PHYSICAL_STANDBY_CONFIG=$?
 dgmgrl /  "show database ${standbydb}" | grep "ORA-16700: the standby database has diverged from the primary database" > /dev/null
 PHYSICAL_STANDBY_DIVERGENCE=$?
 
-if [ ${PHYSICAL_STANDBY_CONFIG} -eq 0 && ${PHYSICAL_STANDBY_DIVERGENCE} -gt 1 ]
+if [[ ${PHYSICAL_STANDBY_CONFIG} -eq 0 && ${PHYSICAL_STANDBY_DIVERGENCE} -gt 1 ]];
 then
   info "${standbydb} already configured in dgbroker, can assume no duplicate required"
 else
