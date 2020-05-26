@@ -272,7 +272,16 @@ then
   info "${standbydb} has diverged from the primary database"
 fi
 
-if [[ ${PHYSICAL_STANDBY_CONFIG} -eq 0 && ${PHYSICAL_STANDBY_DIVERGENCE} -ge 1 ]];
+# Check if ORA-16766 error code associated with standby (requires rebuild)
+dgmgrl /  "show database ${standbydb}" | grep "ORA-16766: Redo Apply is stopped" > /dev/null
+REDO_APPLY_STOPPED=$?
+
+if [[ ${REDO_APPLY_STOPPED} -eq 0 ]];
+then
+  info "${standbydb} redo apply has stopped when it should have been running"
+fi
+
+if [[ ${PHYSICAL_STANDBY_CONFIG} -eq 0 && ${PHYSICAL_STANDBY_DIVERGENCE} -ge 1 && ${REDO_APPLY_STOPPED} -ge 1 ]];
 then
   info "${standbydb} already configured in dgbroker, can assume no duplicate required"
 else
