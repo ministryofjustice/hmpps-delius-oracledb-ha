@@ -256,14 +256,28 @@ set_ora_env ${STANDBYDB}
 dgmgrl /  "show configuration" | grep "Physical standby database"  | grep "${standbydb}" > /dev/null
 PHYSICAL_STANDBY_CONFIG=$?
 
+if [[ ${PHYSICAL_STANDBY_CONFIG} -eq 0 ]];
+then
+  info "${standbydb} already configured in dgbroker"
+else
+  info "${standbydb} not configured in dgbroker"
+fi
+
 # Check if ORA-16700 error code associated with standby (requires rebuild)
 dgmgrl /  "show database ${standbydb}" | grep "ORA-16700: the standby database has diverged from the primary database" > /dev/null
 PHYSICAL_STANDBY_DIVERGENCE=$?
+
+if [[ ${PHYSICAL_STANDBY_DIVERGENCE} -eq 0 ]];
+then
+  info "${standbydb} has diverged from the primary database"
+fi
 
 if [[ ${PHYSICAL_STANDBY_CONFIG} -eq 0 && ${PHYSICAL_STANDBY_DIVERGENCE} -gt 1 ]];
 then
   info "${standbydb} already configured in dgbroker, can assume no duplicate required"
 else
+
+  info "${standbydb} : PSC ${PHYSICAL_STANDBY_CONFIG}  PSD ${PHYSICAL_STANDBY_DIVERGENCE} "
 
   # Shutdown standby instance and remove standby database from DATA and FLASH asm diskgroups
   remove_asm_directories
