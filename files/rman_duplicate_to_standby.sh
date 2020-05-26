@@ -272,12 +272,10 @@ then
   info "${standbydb} has diverged from the primary database"
 fi
 
-if [[ ${PHYSICAL_STANDBY_CONFIG} -eq 0 && ${PHYSICAL_STANDBY_DIVERGENCE} -gt 1 ]];
+if [[ ${PHYSICAL_STANDBY_CONFIG} -eq 0 && ${PHYSICAL_STANDBY_DIVERGENCE} -ge 1 ]];
 then
   info "${standbydb} already configured in dgbroker, can assume no duplicate required"
 else
-
-  info "${standbydb} : PSC ${PHYSICAL_STANDBY_CONFIG}  PSD ${PHYSICAL_STANDBY_DIVERGENCE} "
 
   # Shutdown standby instance and remove standby database from DATA and FLASH asm diskgroups
   remove_asm_directories
