@@ -183,6 +183,7 @@ remove_asm_directories () {
 EOF
   [ $? -ne 0 ] && error "Shutting down ${STANDBYDB}"
 
+  sleep 10
   set_ora_env +ASM
 
   for VG in DATA FLASH
@@ -253,8 +254,34 @@ mkdir -p /u01/app/oracle/admin/${standbydb}/adump
 # Check if standby database configured in dgbroker
 set_ora_env ${STANDBYDB}
 dgmgrl /  "show configuration" | grep "Physical standby database"  | grep "${standbydb}" > /dev/null
+PHYSICAL_STANDBY_CONFIG=$?
 
-if [ $? -eq 0 ]
+if [[ ${PHYSICAL_STANDBY_CONFIG} -eq 0 ]];
+then
+  info "${standbydb} already configured in dgbroker"
+else
+  info "${standbydb} not configured in dgbroker"
+fi
+
+# Check if ORA-16700 error code associated with standby (requires rebuild)
+dgmgrl /  "show database ${standbydb}" | grep "ORA-16700: the standby database has diverged from the primary database" > /dev/null
+PHYSICAL_STANDBY_DIVERGENCE=$?
+
+if [[ ${PHYSICAL_STANDBY_DIVERGENCE} -eq 0 ]];
+then
+  info "${standbydb} has diverged from the primary database"
+fi
+
+# Check if ORA-16766 error code associated with standby (requires rebuild)
+dgmgrl /  "show database ${standbydb}" | grep "ORA-16766: Redo Apply is stopped" > /dev/null
+REDO_APPLY_STOPPED=$?
+
+if [[ ${REDO_APPLY_STOPPED} -eq 0 ]];
+then
+  info "${standbydb} redo apply has stopped when it should have been running"
+fi
+
+if [[ ${PHYSICAL_STANDBY_CONFIG} -eq 0 && ${PHYSICAL_STANDBY_DIVERGENCE} -ge 1 && ${REDO_APPLY_STOPPED} -ge 1 ]];
 then
   info "${standbydb} already configured in dgbroker, can assume no duplicate required"
 else
