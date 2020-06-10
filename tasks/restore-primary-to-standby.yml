@@ -1,10 +1,29 @@
 
-- name: (main/restore-primary-to-standby) Fetch primary orapwfile to locahost
-  fetch: 
-    src: "{{ database_primary_orapwfile}}"
-    dest: "/tmp/"
-    flat: yes
-  when: inventory_hostname in groups[primary]
+- name: (main/restore-primary-to-standby) Primary tasks
+  block:
+
+      - name: (main/restore-primary-to-standby) Fetch primary orapwfile to locahost
+        fetch: 
+          src: "{{ database_primary_orapwfile}}"
+          dest: "/tmp/"
+          flat: yes
+
+      - name: (main/restore-primary-to-standby) Detect dataguard config on primary
+        script: get_dataguard_configuration.sh
+        changed_when: false
+        become: true
+        become_user: "{{ rdbms_service_user.name }}"
+        register: get_dataguard_configuration
+
+      # If there is no dataguard configuration on the primary we want to force a duplicate to standby regardless
+      # of the dataguard status on the standby.  This typically occurs if the primary has been refreshed or restored
+      # and we need to force the standby databases (which may still be running from before the restore) to be refreshed as well.
+      - name: (main/restore-primary-to-standby) Set Force Restore Flag if no Dataguard Configuration on Primary
+        set_fact:
+            force_restore: "-f"
+        when: get_dataguard_configuration.stdout is search('ORA-16532')
+
+  when: inventory_hostname in groups[primary]  
 
 - name: (main/restore-primary-to_standby) 
   block:
@@ -26,7 +45,7 @@
       become_user: "{{ rdbms_service_user.name }}"
 
     - name: (main/restore-primary-to-standby) Run rman restore bash script
-      shell: ". ~/.bash_profile; /tmp/rman_duplicate_to_standby.sh -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }} -i {{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg"
+      shell: ". ~/.bash_profile; /tmp/rman_duplicate_to_standby.sh {{ hostvars[groups[primary][0]].force_restore | default('')}} -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }} -i {{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg"
       become: true
       become_user: "{{ rdbms_service_user.name }}"
       register: restore_result
