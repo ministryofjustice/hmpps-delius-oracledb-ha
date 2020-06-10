@@ -22,12 +22,14 @@ error () {
    echo ""
    echo "Usage:"
    echo ""
-   echo "  $THISSCRIPT -t <primary db> -s <standby db> -p <sys password> -i < init pfile>"
+   echo "  $THISSCRIPT -t <primary db> -s <standby db> -p <sys password> -i < init pfile> -f"
    echo ""
    echo "  primary db              = primary database name"
    echo "  standby db              = standby database name"
    echo "  sys password            = database sys password"
    echo "  init pfile              = parameter initialization file"
+   echo ""
+   echo "  specifying -f will force a database duplication regardless of dataguard status"
    echo ""
    exit 1
 }
@@ -129,6 +131,8 @@ add_to_crs () {
    shutdown abort
    exit
 EOF
+  # Allow slight pause for CRS to detect database down as shutdown using sqlplus
+  sleep 30
   srvctl status database -d ${STANDBYDB} > /dev/null
   if [ $? -ne 0 ]
   then
@@ -227,17 +231,22 @@ info "Retrieving arguments"
 
 TARGETDB=UNSPECIFIED
 
-while getopts "t:s:i:" opt
+while getopts "t:s:i:f" opt
 do
   case $opt in
     t) PRIMARYDB=$OPTARG ;;
     s) STANDBYDB=$OPTARG ;;
     i) PARAMFILE=$OPTARG ;;
+    f) FORCERESTORE=TRUE ;;
     *) usage ;;
   esac
 done
 info "Primary Database = ${PRIMARYDB}"
 info "Standby Database = ${STANDBYDB}"
+if [[ "${FORCERESTORE}" == "TRUE" ]];
+then
+   info "Force Restore selected"
+fi
 
 primarydb=`echo "${PRIMARYDB}" | tr '[:upper:]' '[:lower:]'`
 standbydb=`echo "${STANDBYDB}" | tr '[:upper:]' '[:lower:]'`
@@ -281,7 +290,7 @@ then
   info "${standbydb} redo apply has stopped when it should have been running"
 fi
 
-if [[ ${PHYSICAL_STANDBY_CONFIG} -eq 0 && ${PHYSICAL_STANDBY_DIVERGENCE} -ge 1 && ${REDO_APPLY_STOPPED} -ge 1 ]];
+if [[ ${PHYSICAL_STANDBY_CONFIG} -eq 0 && ${PHYSICAL_STANDBY_DIVERGENCE} -ge 1 && ${REDO_APPLY_STOPPED} -ge 1 && "${FORCERESTORE}" != "TRUE" ]];
 then
   info "${standbydb} already configured in dgbroker, can assume no duplicate required"
 else
