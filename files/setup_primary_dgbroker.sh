@@ -149,6 +149,13 @@ else
     then
       MATCH=1
       info "${standbydb} already configured in dgbroker"
+      dgmgrl /  "show configuration" | grep "Physical standby database"  | grep ${standbydb} | grep "(disabled)" > /dev/null
+      DG_DISABLED=$?
+      if [ $DG_DISABLED -eq 0 ];
+      then
+         info "${standbydb} configuration is disabled - re-enabling"
+         dgmgrl /  "enable database ${standbydb}" 
+      fi
       break
     fi
   done
