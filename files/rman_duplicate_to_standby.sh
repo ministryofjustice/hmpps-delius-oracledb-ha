@@ -290,7 +290,16 @@ then
   info "${standbydb} redo apply has stopped when it should have been running"
 fi
 
-if [[ ${PHYSICAL_STANDBY_CONFIG} -eq 0 && ${PHYSICAL_STANDBY_DIVERGENCE} -ge 1 && ${REDO_APPLY_STOPPED} -ge 1 && "${FORCERESTORE}" != "TRUE" ]];
+# Check if ORA-16603 error code associated with standby (configuration ID mismatch)
+dgmgrl /  "show database ${standbydb}" | grep "ORA-16603: Data Guard broker detected a mismatch in configuration ID" > /dev/null
+DG_CONFIGURATION_MISMATCH=$?
+
+if [[ ${DG_CONFIGURATION_MISMATCH} -eq 0 ]];
+then
+  info "${standbydb} has a mismatched dataguard configuration"
+fi
+
+if [[ ${PHYSICAL_STANDBY_CONFIG} -eq 0 && ${PHYSICAL_STANDBY_DIVERGENCE} -ge 1 && ${REDO_APPLY_STOPPED} -ge 1 && ${DG_CONFIGURATION_MISMATCH} -ge 1 && "${FORCERESTORE}" != "TRUE" ]];
 then
   info "${standbydb} already configured in dgbroker, can assume no duplicate required"
 else
