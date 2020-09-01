@@ -52,4 +52,8 @@
       become_user: "{{ rdbms_service_user.name }}"
       register: service_add
       failed_when: service_add.rc !=0
+
+    - debug:
+        var: service_add
+
   when: inventory_hostname in groups[standby] or inventory_hostname in groups[primary]
