@@ -15,13 +15,21 @@
         become_user: "{{ rdbms_service_user.name }}"
         register: get_dataguard_configuration
 
+      - name: (main/restore-primary-to-standby) Check standby database is in sync
+        script: standby_database_insync.sh
+        changed_when: false
+        delegate_to: "{{ standby_host }}"
+        become: true
+        become_user: "{{ rdbms_service_user.name }}"
+        register: standby_database_insync
+
       # If there is no dataguard configuration on the primary we want to force a duplicate to standby regardless
       # of the dataguard status on the standby.  This typically occurs if the primary has been refreshed or restored
       # and we need to force the standby databases (which may still be running from before the restore) to be refreshed as well.
       - name: (main/restore-primary-to-standby) Set Force Restore Flag if no Dataguard Configuration on Primary
         set_fact:
             force_restore: "-f"
-        when: get_dataguard_configuration.stdout is search('ORA-16532')
+        when: get_dataguard_configuration.stdout is search('ORA-16532') or (not standby_database_insync.stdout_lines[0])
 
   when: inventory_hostname in groups[primary]  
 
