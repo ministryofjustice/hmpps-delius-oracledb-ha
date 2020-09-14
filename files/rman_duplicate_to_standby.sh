@@ -117,7 +117,9 @@ create_asm_spfile () {
   info "Add spfile to ASM"
   sqlplus -s / as sysdba <<EOF
   create pfile='${ORACLE_HOME}/dbs/tmp.ora' from spfile;
-  create spfile='+DATA/${STANDBYDB}/spfile${STANDBYDB}.ora' from pfile='${ORACLE_HOME}/dbs/tmp.ora';
+  --create spfile='+DATA/${STANDBYDB}/spfile${STANDBYDB}.ora' from pfile='${ORACLE_HOME}/dbs/tmp.ora';
+  -- No longer allowed to specify the exact path to spfile
+  create spfile='+DATA' from pfile='${ORACLE_HOME}/dbs/tmp.ora';
 EOF
   [ $? -ne 0 ] && error "Creating spfile in ASM"
   info "Create new pfile and remove spfile"
