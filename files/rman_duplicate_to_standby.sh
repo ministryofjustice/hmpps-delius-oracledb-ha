@@ -198,11 +198,16 @@ EOF
     then
       asmcmd rm -rf +${VG}/${STANDBYDB}
       [ $? -ne 0 ] && error "Removing directory ${STANDBYDB} in ${VG}"
-      # Must add it back in for 18c or it complains when restoring SPFILE
-      asmcmd mkdir +${VG}/${STANDBYDB}
     else
       info "No ${STANDBYDB}directory in ${VG} to delete"
     fi
+  done
+
+  # In 18c the SPFILE restore will fail in the absense of a named directory
+  # so must precreate these
+  for VG in DATA FLASH
+  do
+      asmcmd mkdir +${VG}/${STANDBYDB}
   done
 }
 
