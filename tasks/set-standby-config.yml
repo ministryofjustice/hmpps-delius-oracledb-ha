@@ -69,5 +69,6 @@
       db_name={{ database_global_database_name }}
       db_unique_name={{ database_standby_unique_name }}
       instance_name={{ database_standby_sid }}
+      compatible=18.10.0.0
     owner: "{{ rdbms_service_user.name }}"
     group: "{{ rdbms_service_user.group }}"
