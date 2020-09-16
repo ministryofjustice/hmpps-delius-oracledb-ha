@@ -114,14 +114,53 @@ EOF
 }
 
 create_asm_spfile () {
-  info "Add spfile to ASM"
-  sqlplus -s / as sysdba <<EOF
-  create pfile='${ORACLE_HOME}/dbs/tmp.ora' from spfile;
-  create spfile='+DATA/${STANDBYDB}/spfile${STANDBYDB}.ora' from pfile='${ORACLE_HOME}/dbs/tmp.ora';
+  # From 18c the SPFILE may have been restored directly into ASM rather than on the file system
+  # as previously, so we need to check where the SPFILE is before attempting to overwrite it.
+  CURRENT_SPFILE_LOCATION=$(
+    sqlplus -s / as sysdba <<EOSQL
+    set heading off
+    set newpage none
+    select value
+    from   v\$parameter
+    where  name='spfile';
+EOSQL
+  )
+  REQUIRED_SPFILE_LOCATION="+DATA/${STANDBYDB}/spfile${STANDBYDB}.ora"
+  info "Current Spfile is at >>${CURRENT_SPFILE_LOCATION}<< and Required Spfile is at >>${REQUIRED_SPFILE_LOCATION^^}<<"
+  if [ "${CURRENT_SPFILE_LOCATION^^}" == "${REQUIRED_SPFILE_LOCATION^^}" ];
+  then
+     # If the SPFILE is in the right location it may simply be an alias to an UNKNOWN database
+     # as it was restored when the auxiliary was in NOMOUNT state
+     DISK_GROUP=$(asmcmd ls -l ${REQUIRED_SPFILE_LOCATION^^} | tail -1  | awk -F"=> " '{print $2}' | awk -F"/" '{print $1}')
+     SP_ALIAS=$(asmcmd ls -l ${REQUIRED_SPFILE_LOCATION^^} | tail -1 | awk -F"${DISK_GROUP}/" '{print $2}' | awk -F"/" '{print $1}')
+     if [ "${SP_ALIAS}" == "DB_UNKNOWN" ];
+     then 
+        # SPFILE is aliased to DB_UNKNOWN directory.  It needs to be moved to avoid confusion.
+        # The simplest way for this is to drop the alias and recreate the spfile.   This requires a restart.
+        info "Moving spfile out of DB_UNKNOWN"
+        sqlplus -s / as sysdba <<EOSQL
+        create pfile='${ORACLE_HOME}/dbs/tmp.ora' from spfile;
+        alter diskgroup ${DISK_GROUP} drop alias '${CURRENT_SPFILE_LOCATION^^}';
+        shutdown immediate;
+        -- Database must be mounted when creating new SPFILE otherwise it will end up back in DB_UNKNOWN
+        startup mount pfile='${ORACLE_HOME}/dbs/tmp.ora';
+        create spfile='${REQUIRED_SPFILE_LOCATION}' from pfile='${ORACLE_HOME}/dbs/tmp.ora';
+        shutdown immediate;
+        startup mount;
+EOSQL
+      fi
+  fi
+  if [ "${CURRENT_SPFILE_LOCATION^^}" != "${REQUIRED_SPFILE_LOCATION^^}" ];
+  then
+     info "Add spfile to ASM"
+     sqlplus -s / as sysdba <<EOF
+     create pfile='${ORACLE_HOME}/dbs/tmp.ora' from spfile;
+     create spfile='${REQUIRED_SPFILE_LOCATION}' from pfile='${ORACLE_HOME}/dbs/tmp.ora';
 EOF
-  [ $? -ne 0 ] && error "Creating spfile in ASM"
+     [ $? -ne 0 ] && error "Creating spfile in ASM"
+  fi
   info "Create new pfile and remove spfile"
-  echo "SPFILE='+DATA/${STANDBYDB}/spfile${STANDBYDB}.ora'" > ${ORACLE_HOME}/dbs/init${STANDBYDB}.ora
+  echo "SPFILE='${REQUIRED_SPFILE_LOCATION}'" > ${ORACLE_HOME}/dbs/init${STANDBYDB}.ora
   rm ${ORACLE_HOME}/dbs/spfile${STANDBYDB}.ora ${ORACLE_HOME}/dbs/tmp.ora
 }
 
@@ -201,6 +240,13 @@ EOF
     else
       info "No ${STANDBYDB}directory in ${VG} to delete"
     fi
+  done
+  # From 18c we must have the second level ASM directories in place before restoring SPFILE
+  # as it will now fail rather than defaulting to $ORACLE_HOME/dbs as it did previously.
+  for VG in DATA FLASH
+  do
+    info "Create directory ${STANDBYDB} in ${VG} volume group"
+    asmcmd mkdir +${VG}/${STANDBYDB}
   done
 }
 

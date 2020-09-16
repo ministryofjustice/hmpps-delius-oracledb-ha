@@ -62,6 +62,14 @@
   failed_when: listener_result.rc !=0
   when: standby_listener.changed
 
+- name: (main/set-standby-config) Get the compatible value from primary
+  script: get_primary_compatible.sh
+  register: get_primary_compatible
+  changed_when: false
+  delegate_to: "{{ groups[primary][0] }}"
+  become: true
+  become_user: "{{ rdbms_service_user.name }}"
+
 - name: (main/set-standby-config) Setup standby initial parameter file
   copy: 
     dest: "{{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg"
@@ -69,5 +77,6 @@
       db_name={{ database_global_database_name }}
       db_unique_name={{ database_standby_unique_name }}
       instance_name={{ database_standby_sid }}
+      compatible='{{ get_primary_compatible.stdout_lines[0] }}'
     owner: "{{ rdbms_service_user.name }}"
     group: "{{ rdbms_service_user.group }}"
