@@ -115,14 +115,17 @@ EOF
 
 create_asm_spfile () {
   info "Add spfile to ASM"
-  # Within 18c the SPFILE will have been restored to the DB_UNKNOWN directory within ASM, and an
-  # alias created for it.   To move the SPFILE to the intended destination it is necessary to
-  # bounce the instance using the temporary pfile.   This will also remove the DB_UNKNOWN directory and aliases.
+  # Within 18c the SPFILE will have been duplicated to the DB_UNKNOWN directory within ASM, and an
+  # alias created for it (instead of to the file system as would have happened with 11g).
+  # To move the SPFILE to the intended destination it is necessary to bounce the instance using the temporary pfile.   
+  # This will also remove the DB_UNKNOWN directory and aliases.
   sqlplus -s / as sysdba <<EOF
   create pfile='${ORACLE_HOME}/dbs/tmp.ora' from spfile;
   shutdown immediate;
   -- Database must be mounted when creating new SPFILE otherwise it will end up back in DB_UNKNOWN
+  -- The restart is really only required for 18c but are harmless to do for 11g also.
   startup mount pfile='${ORACLE_HOME}/dbs/tmp.ora';
+  -- Recreating the SPFILE will automatically remove the DB_UNKNOWN directory from ASM and aliases.
   create spfile='+DATA/${STANDBYDB}/spfile${STANDBYDB}.ora' from pfile='${ORACLE_HOME}/dbs/tmp.ora';
   shutdown immediate;
   startup mount;
