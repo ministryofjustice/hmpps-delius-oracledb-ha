@@ -115,9 +115,20 @@ EOF
 
 create_asm_spfile () {
   info "Add spfile to ASM"
+  # Within 18c the SPFILE will have been duplicated to the DB_UNKNOWN directory within ASM, and an
+  # alias created for it (instead of to the file system as would have happened with 11g).
+  # To move the SPFILE to the intended destination it is necessary to bounce the instance using the temporary pfile.   
+  # This will also remove the DB_UNKNOWN directory and aliases.
   sqlplus -s / as sysdba <<EOF
   create pfile='${ORACLE_HOME}/dbs/tmp.ora' from spfile;
+  shutdown immediate;
+  -- Database must be mounted when creating new SPFILE otherwise it will end up back in DB_UNKNOWN
+  -- The restart is really only required for 18c but are harmless to do for 11g also.
+  startup mount pfile='${ORACLE_HOME}/dbs/tmp.ora';
+  -- Recreating the SPFILE will automatically remove the DB_UNKNOWN directory from ASM and aliases.
   create spfile='+DATA/${STANDBYDB}/spfile${STANDBYDB}.ora' from pfile='${ORACLE_HOME}/dbs/tmp.ora';
+  shutdown immediate;
+  startup mount;
 EOF
   [ $? -ne 0 ] && error "Creating spfile in ASM"
   info "Create new pfile and remove spfile"
@@ -201,6 +212,13 @@ EOF
     else
       info "No ${STANDBYDB}directory in ${VG} to delete"
     fi
+  done
+  # From 18c we must have the second level ASM directories in place before restoring SPFILE
+  # as it will now fail rather than defaulting to $ORACLE_HOME/dbs as it did previously.
+  for VG in DATA FLASH
+  do
+    info "Create directory ${STANDBYDB} in ${VG} volume group"
+    asmcmd mkdir +${VG}/${STANDBYDB}
   done
 }
 
