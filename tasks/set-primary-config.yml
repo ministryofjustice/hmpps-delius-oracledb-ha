@@ -7,7 +7,7 @@
 
       {{ database_standby_unique_name }} =
       (DESCRIPTION =
-        (ADDRESS = (PROTOCOL = TCP)(HOST = {{ standby_host }})(PORT = 1521))
+        (ADDRESS = (PROTOCOL = TCP)(HOST = {{ standby_host_tns }})(PORT = 1521))
           (CONNECT_DATA = 
             (SERVER = DEDICATED) 
             (SERVICE_NAME = {{ database_standby_unique_name }})
