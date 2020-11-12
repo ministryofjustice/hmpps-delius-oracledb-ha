@@ -11,6 +11,17 @@
   when: high_availability_count is defined and high_availability_count==0
   tags: var
 
+- name: (main/set-primary-config) Gather facts with dns filter
+  setup:
+    filter: ansible_dns
+  tags: var
+
+- name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
+  set_fact:
+    standby_host_tns: "{{ standby_host | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
+    primary_host_tns: "{{ primary_host | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
+  tags: var
+
 - name: (main) Load in our vars
   include_vars:
     file: main.yml
