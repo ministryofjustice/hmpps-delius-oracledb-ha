@@ -107,7 +107,7 @@ perform_recovery () {
   sqlplus -s / as sysdba << EOF
     alter database close;
     alter database flashback on;
-    alter database recover managed standby database using current logfile disconnect;
+    alter database recover managed standby database disconnect;
     exit;
 EOF
   [ $? -ne 0 ] && error "Recovering the standby" || info "Standby ${STANDBYDB} now recovering"
