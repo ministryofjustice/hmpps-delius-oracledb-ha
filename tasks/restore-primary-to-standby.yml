@@ -58,6 +58,8 @@
       become_user: "{{ rdbms_service_user.name }}"
       register: restore_result
       failed_when: restore_result.rc != 0
+      vars:
+        ansible_aws_ssm_timeout: 28800
 
     - name: (main/restore-primary-to-standby) Print rman restore output
       debug:
