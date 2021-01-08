@@ -54,12 +54,12 @@
 
     - name: (main/restore-primary-to-standby) Run rman restore bash script
       shell: ". ~/.bash_profile; /tmp/rman_duplicate_to_standby.sh {{ hostvars[groups[primary][0]].force_restore | default('')}} -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }} -i {{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg"
+      async: 28800
+      poll: 20
       become: true
       become_user: "{{ rdbms_service_user.name }}"
       register: restore_result
       failed_when: restore_result.rc != 0
-      vars:
-        ansible_aws_ssm_timeout: 28800
 
     - name: (main/restore-primary-to-standby) Print rman restore output
       debug:
