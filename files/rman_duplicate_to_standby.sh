@@ -22,12 +22,13 @@ error () {
    echo ""
    echo "Usage:"
    echo ""
-   echo "  $THISSCRIPT -t <primary db> -s <standby db> -p <sys password> -i < init pfile> -f"
+   echo "  $THISSCRIPT -t <primary db> -s <standby db> -p <sys password> -i < init pfile> -f [ -p <ssm parameter> ]"
    echo ""
    echo "  primary db              = primary database name"
    echo "  standby db              = standby database name"
    echo "  sys password            = database sys password"
    echo "  init pfile              = parameter initialization file"
+   echo "  ssm parameter           = ssm parameter name to be updated"
    echo ""
    echo "  specifying -f will force a database duplication regardless of dataguard status"
    echo ""
@@ -248,19 +249,22 @@ info "Retrieving arguments"
 [ -z "$1" ] && usage
 
 TARGETDB=UNSPECIFIED
+SSM_PARAMETER=UNSPECIFIED
 
-while getopts "t:s:i:f" opt
+while getopts "t:s:i:f:p:" opt
 do
   case $opt in
     t) PRIMARYDB=$OPTARG ;;
     s) STANDBYDB=$OPTARG ;;
     i) PARAMFILE=$OPTARG ;;
     f) FORCERESTORE=TRUE ;;
+    p) SSM_PARAMETER=$OPTARG ;;
     *) usage ;;
   esac
 done
 info "Primary Database = ${PRIMARYDB}"
 info "Standby Database = ${STANDBYDB}"
+info "SSM parameter    = $SSM_PARAMETER"
 if [[ "${FORCERESTORE}" == "TRUE" ]];
 then
    info "Force Restore selected"
@@ -347,4 +351,16 @@ else
   # Remove orphaned archivelogs left by previous incarnation
   remove_orphaned_archive
 fi
+
+info "Update ssm duplicate parameter if specified"
+if [ "${SSM_PARAMETER}" != "UNSPECIFIED" ]
+then  
+  . /etc/environment
+  aws ssm put-parameter --region ${REGION} --value "CompletedHA" --name "${SSM_PARAMETER}" --overwrite --type String
+  [ $? -ne 0 ] && error "Updating ssm duplicate parameter"
+fi
+
 info "End"
+
+# Exit with success status if no error found
+exit 0
