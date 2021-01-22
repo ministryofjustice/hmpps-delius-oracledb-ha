@@ -2,15 +2,17 @@
 
 PATH=/usr/sbin:/usr/local/bin:$PATH
 THISSCRIPT=`basename $0`
+OUTPUT=/tmp/`basename $0 .sh`.out
+>${OUTPUT}
 
 info () {
   T=`date +"%D %T"`
-    echo -e "INFO : $THISSCRIPT : $T : $1"
+    echo -e "INFO : $THISSCRIPT : $T : $1 "| tee -a ${OUTPUT}
 }
 
 error () {
   T=`date +"%D %T"`
-  echo -e "ERROR : $THISSCRIPT : $T : $1"
+  echo -e "ERROR : $THISSCRIPT : $T : $1" | tee -a ${OUTPUT}
   exit 1
   }
 

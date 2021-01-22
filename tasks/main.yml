@@ -2,6 +2,32 @@
 
 # tasks file for hmpps-delius-oracledb-ha
 
+- name: (main) Intialize variables
+  set_fact:
+    update_ssm_parameter_restore: false
+    post_restore: false
+
+- name: (main) Set fact to decide whether to update ssm parameter post rman duplicate
+  set_fact:
+    update_ssm_parameter_restore: true
+  when:  (ssm_option is defined and ssm_option | length > 0) and (method is defined and method == "build")
+
+- name: (main) Set fact to only carry out tasks post rman rman duplicate
+  set_fact:
+    post_restore: true
+  when:  method is defined and method == "post"
+
+- block:
+    - name: (main) Configure Oracle data guard broker
+      include: set-primary-dgbroker.yml
+      when: inventory_hostname in groups[ primary ]
+
+    - name: (main) Setup taf service name
+      include: set-taf-service.yml
+
+    - meta: end_play
+  when: post_restore
+
 - block:
     - name: (main) Only carry out ha tasks if high availability configured
       debug:
@@ -83,11 +109,13 @@
   include: restore-primary-to-standby.yml
   tags: restore
 
-- name: (main) Configure Oracle data guard broker
-  include: set-primary-dgbroker.yml
-  when: inventory_hostname in groups[ primary ]
-  tags: dg
+- block:
+    - name: (main) Configure Oracle data guard broker
+      include: set-primary-dgbroker.yml
+      when: inventory_hostname in groups[ primary ]
+      tags: dg
 
-- name: (main) Setup taf service name
-  include: set-taf-service.yml
-  tags: taf
+    - name: (main) Setup taf service name
+      include: set-taf-service.yml
+      tags: taf
+  when: not post_restore and not update_ssm_parameter_restore
