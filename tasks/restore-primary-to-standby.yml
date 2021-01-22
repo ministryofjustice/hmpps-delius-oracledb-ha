@@ -52,18 +52,24 @@
       become: true
       become_user: "{{ rdbms_service_user.name }}"
 
+    - name: (main/restore-primary-to-standby) Set ssm parameter option if required
+      set_fact:
+        ssm_parameter_option: "-p {{ ssm_option }}"
+        poll_value: 0 
+      when: update_ssm_parameter_restore
+
     - name: (main/restore-primary-to-standby) Run rman restore bash script
-      shell: ". ~/.bash_profile; /tmp/rman_duplicate_to_standby.sh {{ hostvars[groups[primary][0]].force_restore | default('')}} -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }} -i {{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg"
+      shell: ". ~/.bash_profile; /tmp/rman_duplicate_to_standby.sh {{ hostvars[groups[primary][0]].force_restore | default('')}} -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }} -i {{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg {{ ssm_parameter_option|default() }}"
       async: 28800
-      poll: 20
+      poll: "{{ poll_value | default(20) }}"
       become: true
       become_user: "{{ rdbms_service_user.name }}"
       register: restore_result
-      failed_when: restore_result.rc != 0
 
     - name: (main/restore-primary-to-standby) Print rman restore output
       debug:
         var: restore_result.stdout_lines
         verbosity: 0
+      when: not update_ssm_parameter_restore
 
   when: inventory_hostname in groups[standby]
