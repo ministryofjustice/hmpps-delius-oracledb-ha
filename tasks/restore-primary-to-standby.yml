@@ -29,7 +29,7 @@
       - name: (main/restore-primary-to-standby) Set Force Restore Flag if no Dataguard Configuration on Primary
         set_fact:
             force_restore: "-f"
-        when: get_dataguard_configuration.stdout is search('ORA-16532') or (not standby_database_insync.stdout_lines[0])
+        when: get_dataguard_configuration.stdout is search('ORA-16532') or (not standby_database_insync.stdout_lines[0] | bool)
 
   when: inventory_hostname in groups[primary]  
 
