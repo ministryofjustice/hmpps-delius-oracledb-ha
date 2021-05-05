@@ -251,7 +251,7 @@ info "Retrieving arguments"
 TARGETDB=UNSPECIFIED
 SSM_PARAMETER=UNSPECIFIED
 
-while getopts "t:s:i:f:p:" opt
+while getopts "t:s:i:fp:" opt
 do
   case $opt in
     t) PRIMARYDB=$OPTARG ;;
