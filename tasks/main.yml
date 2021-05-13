@@ -54,11 +54,11 @@
   no_log: true
   tags: always
 
-- name: (main) Get our ec2 instance facts
-  ec2_metadata_facts:
-  register: ec2_metadata_facts
-  no_log: true
-  tags: always
+# - name: (main) Get our ec2 instance facts
+#   ec2_metadata_facts:
+#   register: ec2_metadata_facts
+#   no_log: true
+#   tags: always
 
 - name: (main) Get the Dependencies Bucket ARN from Primary
   shell: . /etc/environment; echo $DEPENDENCIES_BUCKET_ARN
