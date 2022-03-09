@@ -70,6 +70,5 @@
       debug:
         var: restore_result.stdout_lines
         verbosity: 0
-      when: not update_ssm_parameter_restore
 
   when: inventory_hostname in groups[standby]
