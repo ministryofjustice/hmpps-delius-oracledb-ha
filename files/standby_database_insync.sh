@@ -1,4 +1,8 @@
 #!/bin/bash
+#
+#  Check if the Standby Database is already in sync with the Primary (returns TRUE if this is the case).
+#  Detected by Media Recovery actively waiting for the next redo
+#
 
 . ~/.bash_profile
 
