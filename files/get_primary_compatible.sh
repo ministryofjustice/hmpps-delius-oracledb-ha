@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-#  Get compatible value from primary database
+#  Get compatible value from primary database (primary must be running at this point)
 #
 
 . ~/.bash_profile
