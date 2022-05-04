@@ -26,16 +26,21 @@
       # If there is no dataguard configuration on the primary we want to force a duplicate to standby regardless
       # of the dataguard status on the standby.  This typically occurs if the primary has been refreshed or restored
       # and we need to force the standby databases (which may still be running from before the restore) to be refreshed as well.
-      # Also set this flag if forced (i.e. immediately following a duplicate)
       - name: (main/restore-primary-to-standby) Set Force Restore Flag if no Dataguard Configuration on Primary
         set_fact:
-            force_restore_flag: "-f"
-        when:  ( force_restore | default(false) | bool ) or get_dataguard_configuration.stdout is search('ORA-16532') or (not standby_database_insync.stdout_lines[0] | bool)
+            primary_data_guard_unconfigured: true
+        when: get_dataguard_configuration.stdout is search('ORA-16532') or (not standby_database_insync.stdout_lines[0] | bool)
 
   when: inventory_hostname in groups[primary]  
 
 - name: (main/restore-primary-to_standby) 
   block:
+
+    # Force Restore Flag is Set if Forced (e.g. After Duplicate) or if a Data Guard Config issue has been found on the Primary
+    - name: (main/restore-primary-to-standby) Set Force Restore Flag
+      set_fact:
+          force_restore_flag: "-f"
+      when: ( force_restore | default(false) | bool ) or ( hostvars[groups[primary][0]].primary_data_guard_unconfigured | default(false) | bool )
 
     - name: (main/restore-primary-to-standby) Copy primary orapw file from localhost to standby
       copy: 
