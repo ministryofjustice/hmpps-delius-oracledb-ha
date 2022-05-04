@@ -1,5 +1,8 @@
 ---
 
+- debug:
+     msg: "Force Restore is set to {{ force_restore | string }}"
+
 # tasks file for hmpps-delius-oracledb-ha
 
 - name: (main) Intialize variables

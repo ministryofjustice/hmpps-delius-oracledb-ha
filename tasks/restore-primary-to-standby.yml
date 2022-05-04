@@ -23,6 +23,15 @@
         become_user: "{{ rdbms_service_user.name }}"
         register: standby_database_insync
 
+      - debug:
+           msg: "Force Restore is set to {{ force_restore | string }}"
+
+      - debug:
+           msg: "Data Guard is set to {{ get_dataguard_configuration.stdout is search('ORA-16532') }}"        
+
+      - debug:
+           msg: "In Sync is set to {{ standby_database_insync.stdout_lines[0] | string }}"   
+
       # If there is no dataguard configuration on the primary we want to force a duplicate to standby regardless
       # of the dataguard status on the standby.  This typically occurs if the primary has been refreshed or restored
       # and we need to force the standby databases (which may still be running from before the restore) to be refreshed as well.
@@ -30,7 +39,7 @@
       - name: (main/restore-primary-to-standby) Set Force Restore Flag if no Dataguard Configuration on Primary
         set_fact:
             force_restore_flag: "-f"
-        when:  ( force_restore | default(false) | bool ) or get_dataguard_configuration.stdout is search('ORA-16532') or (not standby_database_insync.stdout_lines[0] | bool)
+        when:  ( force_restore | default(false) | bool ) or (get_dataguard_configuration.stdout is search('ORA-16532')) or (not standby_database_insync.stdout_lines[0] | bool)
 
   when: inventory_hostname in groups[primary]  
 
@@ -58,6 +67,9 @@
         ssm_parameter_option: "-p {{ ssm_option }}"
         poll_value: 0 
       when: update_ssm_parameter_restore
+
+    - debug:
+         msg: "Command is . ~/.bash_profile; /tmp/rman_duplicate_to_standby.sh {{ force_restore_flag | default('') }} -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }} -i {{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg {{ ssm_parameter_option|default() }}"
 
     - name: (main/restore-primary-to-standby) Run rman restore bash script
       shell: ". ~/.bash_profile; /tmp/rman_duplicate_to_standby.sh {{ force_restore_flag | default('') }} -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }} -i {{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg {{ ssm_parameter_option|default() }}"
