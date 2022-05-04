@@ -65,7 +65,7 @@
       when: update_ssm_parameter_restore
 
     - name: (main/restore-primary-to-standby) Run rman restore bash script
-      shell: ". ~/.bash_profile; /tmp/rman_duplicate_to_standby.sh {{ force_restore_flag | default('')}} -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }} -i {{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg {{ ssm_parameter_option|default() }}"
+      shell: ". ~/.bash_profile; /tmp/rman_duplicate_to_standby.sh {{ force_restore_flag | default('') }} -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }} -i {{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg {{ ssm_parameter_option|default() }}"
       async: 28800
       poll: "{{ poll_value | default(20) }}"
       become: true
