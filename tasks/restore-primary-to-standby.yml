@@ -36,16 +36,12 @@
           force_restore_flag: "-f"
       when: ( force_restore | default(false) | bool ) or ( hostvars[groups[primary][0]].primary_data_guard_unconfigured | default(false) | bool )
 
-    - name: (main/restore-primary-to-standby) Copy primary orapw file from primary ASM to standby ASM
-      script: copy_primary_password_file.sh
-      environment:
-         PRIMARY_HOSTNAME: "{{ hostvars[groups][primary][0]].inventory_hostname }}"
-         PRIMARY_SID: "{{ hostvars[groups][primary][0]].database_primary_sid }}"
-
     - name: (main/restore-primary-to-standby) Configure database to use ASM password file
       shell: |
              . ~/.bash_profile
-             srvctl modify database -d {{ database_standby_sid }} -pwfile +DATA/{{ standby_database_sid }}/orapw{{ standby_database_sid }}
+             srvctl modify database -d {{ database_standby_sid }} -pwfile +DATA/{{ database_standby_sid }}/orapw{{ database_standby_sid }}
+      become: true
+      become_user: "{{ rdbms_service_user.name }}"
 
     - name: (main/restore-primary-to-standby) Copy rman restore bash script to standby
       copy:
@@ -62,7 +58,7 @@
       when: update_ssm_parameter_restore
 
     - name: (main/restore-primary-to-standby) Run rman restore bash script
-      shell: ". ~/.bash_profile; /tmp/rman_duplicate_to_standby.sh {{ force_restore_flag | default('') }} -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }} -i {{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg {{ ssm_parameter_option|default() }}"
+      shell: ". ~/.bash_profile; /tmp/rman_duplicate_to_standby.sh {{ force_restore_flag | default('') }} -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }} -i {{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg {{ ssm_parameter_option|default() }}" 
       async: 28800
       poll: "{{ poll_value | default(20) }}"
       become: true

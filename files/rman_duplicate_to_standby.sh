@@ -1,4 +1,5 @@
 #!/bin/bash
+set -x
 
 PATH=$PATH:/usr/sbin:/usr/local/bin
 THISSCRIPT=`basename $0`
@@ -191,6 +192,23 @@ EOF
   [ $? -ne 0 ] && error "Removing orphaned archivelogs" || info "Removed orphaned archivelogs"
 }
 
+# When the ASM files are cleared down, this will remove the password file, so fetch a new copy from the primary
+copy_password_file () {
+
+set_ora_env ${STANDBYDB}
+
+PRIMARY_HOSTNAME=$(tnsping ${PRIMARYDB} | awk -F '[(] *HOST *= *' 'NF>1{print substr($2, 1, match($2, / *[)]/) - 1)}')
+
+set_ora_env +ASM
+
+lookup_db_sys_password
+
+asmcmd <<EOASMCMD
+pwcopy --dbuniquename ${STANDBYDB} sys/${SYSPASS}@${PRIMARY_HOSTNAME}.+ASM:+DATA/${PRIMARYDB}/orapw${PRIMARYDB} +DATA/${STANDBYDB}/orapw${STANDBYDB} -f
+EOASMCMD
+}
+
+
 remove_asm_directories () {
   sleep 10
   info "Shutdown instance ${STANDBYDB}"
@@ -221,6 +239,8 @@ EOF
     info "Create directory ${STANDBYDB} in ${VG} volume group"
     asmcmd mkdir +${VG}/${STANDBYDB}
   done
+
+  sleep 10
 }
 
 remove_standby_parameter_files () {
@@ -328,6 +348,9 @@ else
 
   # Shutdown standby instance and remove standby database from DATA and FLASH asm diskgroups
   remove_asm_directories
+
+  # Having cleared down ASM we will need to put the password file back (copy from primary)
+  copy_password_file
 
   # Remove unneccesary standby parameter files
   remove_standby_parameter_files

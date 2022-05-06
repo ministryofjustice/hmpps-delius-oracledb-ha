@@ -10,8 +10,8 @@ export ORAENV_ASK=NO ;
 . oraenv
 
 . /etc/environment 
-SYS_PASSWORD=$(aws ssm get-parameters --region ${REGION} --with-decryption --name /${HMPPS_ENVIRONMENT}/${APPLICATION}/oem-database/db/oradb_sysman_password | jq -r '.Parameters[].Value')
+SYS_PASSWORD=$(aws ssm get-parameters --region ${REGION} --with-decryption --name /${HMPPS_ENVIRONMENT}/${APPLICATION}/oem-database/db/oradb_sys_password | jq -r '.Parameters[].Value')
 
 asmcmd <<EOASMCMD
-cp sys/${SYS_PASSWORD}@${PRIMARY_HOST}.+ASM:+DATA/${PRIMARY_SID}/orapw${PRIMARY_SID} +DATA/${DBUNIQUENAME}/orapw${DBUNIQUENAME}
+cp sys/${SYS_PASSWORD}@${PRIMARY_HOSTNAME}.+ASM:+DATA/${PRIMARY_SID}/orapw${PRIMARY_SID} +DATA/${DBUNIQUENAME}/orapw${DBUNIQUENAME}
 EOASMCMD
