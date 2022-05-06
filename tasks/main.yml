@@ -54,11 +54,20 @@
   no_log: true
   tags: always
 
+- name: (main) Check if inside AWS.
+  uri:
+    url: http://169.254.169.254/latest/meta-data
+    timeout: 20
+  register: aws_uri_check
+  failed_when: false
+
+- set_fact:
+    is_aws_environment: "{{ aws_uri_check.status == 200 }}"
+
 - name: (main) Get our ec2 instance facts
   ec2_metadata_facts:
-  register: ec2_metadata_facts
+  when: is_aws_environment|bool
   no_log: true
-  tags: always
 
 - name: (main) Get the Dependencies Bucket ARN from Primary
   shell: . /etc/environment; echo $DEPENDENCIES_BUCKET_ARN
@@ -88,7 +97,6 @@
     - set_fact:
         oracle_database_oracle_home: "{{ oracle_home.stdout }}"
         oracle_grid_oracle_home: "{{ grid_home.stdout }}"
-        database_primary_orapwfile: "{{ oracle_home.stdout }}/dbs/orapw{{ database_primary_sid_name }}"
   tags: var
 
 - name: (main) Set standby configuration parameters

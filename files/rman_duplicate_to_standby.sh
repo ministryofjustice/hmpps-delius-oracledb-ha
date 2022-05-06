@@ -225,7 +225,7 @@ EOF
 
 remove_standby_parameter_files () {
   set_ora_env ${STANDBYDB}
-  ls ${ORACLE_HOME}/dbs/*${STANDBYDB}* | egrep -v "${PARAMFILE}|orapw${STANDBYDB}" | xargs -r rm 
+  ls ${ORACLE_HOME}/dbs/*${STANDBYDB}* | egrep -v "${PARAMFILE}" | xargs -r rm 
   [ $? -ne 0 ] && error "Removing standby parameter files"
 }
 
