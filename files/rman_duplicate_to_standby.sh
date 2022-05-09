@@ -1,5 +1,4 @@
 #!/bin/bash
-set -x
 
 PATH=$PATH:/usr/sbin:/usr/local/bin
 THISSCRIPT=`basename $0`
