@@ -5,7 +5,7 @@ THISSCRIPT=`basename $0`
 RMANCMDFILE=/tmp/rmanduplicatestandby.cmd
 RMANLOGFILE=/tmp/rmanduplicatestandby.log
 RMANARCCLRLOG=/tmp/rmanarchiveclear.log
-CPU_COUNT=$((`grep processor /proc/cpuinfo | wc -l`/2))
+CPU_COUNT=$(`grep processor /proc/cpuinfo | wc -l`)
 
 info () {
   T=`date +"%D %T"`
