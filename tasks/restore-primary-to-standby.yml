@@ -25,6 +25,18 @@
             primary_data_guard_unconfigured: true
         when: get_dataguard_configuration.stdout is search('ORA-16532') or (not standby_database_insync.stdout_lines[0] | bool)
 
+      # The RMAN Catalog may not exist in the TNS Names File on the Standby, so record its value for later use if
+      # we are not using Active Database Duplication
+      - name: (main/restore-primary-to-standby) Get Catalog TNS Alias
+        shell: |
+                . ~/.bash_profile
+                tnsping {{ catalog }} | grep Attempting | sed 's/Attempting to contact //' | sed 's/ //g'
+        register: rman_tnsnames 
+        changed_when: false
+        run_once: true
+        become: true
+        become_user: "{{ rdbms_service_user.name }}"
+
   when: inventory_hostname in groups[primary]  
 
 - name: (main/restore-primary-to_standby) 
@@ -57,8 +69,19 @@
         poll_value: 0 
       when: update_ssm_parameter_restore
 
+    - name: (main/restore-primary-to-standby) Set use backup flag and RMAN catalog connection if not using Active Duplication
+      set_fact:
+         use_backup_flag: "-b -c \"{{ rman_tnsnames.stdout }}\""
+      when: ( primary_source_type | default('active') ) == 'backup'
+
+    # Avoid Attempt to Create SBT Channels when running outside of AWS
+    - name: (main/restore-primary-to-standby) Set No SBT flag if Active Duplicate or not inside AWS
+      set_fact:
+        no_sbt_flag: "-n"
+      when: (not is_aws_environment) or  ( primary_source_type | default('active') )  == 'backup'
+
     - name: (main/restore-primary-to-standby) Run rman restore bash script
-      shell: ". ~/.bash_profile; /tmp/rman_duplicate_to_standby.sh {{ force_restore_flag | default('') }} -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }} -i {{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg {{ ssm_parameter_option|default() }}"
+      shell: ". ~/.bash_profile; /tmp/rman_duplicate_to_standby.sh {{ use_backup_flag | default('') }} {{ no_sbt_flag | default('') }} {{ force_restore_flag | default('') }} -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }} -i {{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg {{ ssm_parameter_option|default() }}"
       async: 28800
       poll: "{{ poll_value | default(20) }}"
       become: true

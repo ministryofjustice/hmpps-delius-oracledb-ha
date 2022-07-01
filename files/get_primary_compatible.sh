@@ -16,3 +16,4 @@ FROM   v\$parameter
 WHERE  name='compatible';
 EXIT
 EOF
+

@@ -5,16 +5,20 @@ THISSCRIPT=`basename $0`
 RMANCMDFILE=/tmp/rmanduplicatestandby.cmd
 RMANLOGFILE=/tmp/rmanduplicatestandby.log
 RMANARCCLRLOG=/tmp/rmanarchiveclear.log
+RMANSCRIPTLOG=/tmp/rmanscript.log
+>>${RMANSCRIPTLOG}
 CPU_COUNT=$((`grep processor /proc/cpuinfo | wc -l`/2))
 
 info () {
   T=`date +"%D %T"`
     echo -e "INFO : $THISSCRIPT : $T : $1"
+    echo -e "INFO : $THISSCRIPT : $T : $1" >> ${RMANSCRIPTLOG}
 }
 
 error () {
   T=`date +"%D %T"`
   echo -e "ERROR : $THISSCRIPT : $T : $1"
+  echo -e "ERROR : $THISSCRIPT : $T : $1" >> ${RMANSCRIPTLOG}
   exit 1
   }
 
@@ -22,15 +26,22 @@ error () {
    echo ""
    echo "Usage:"
    echo ""
-   echo "  $THISSCRIPT -t <primary db> -s <standby db> -p <sys password> -i < init pfile> -f [ -p <ssm parameter> ]"
+   echo "  $THISSCRIPT -t <primary db> -s <standby db> -p <sys password> -i < init pfile> [ -p <ssm parameter> ] [ -c <catalog TNS string> ] [-f] [-b]"
    echo ""
-   echo "  primary db              = primary database name"
-   echo "  standby db              = standby database name"
-   echo "  sys password            = database sys password"
-   echo "  init pfile              = parameter initialization file"
-   echo "  ssm parameter           = ssm parameter name to be updated"
+   echo "  Parameterized Options:"
    echo ""
-   echo "  specifying -f will force a database duplication regardless of dataguard status"
+   echo "  -t primary db              = primary database name"
+   echo "  -s standby db              = standby database name"
+   echo "  -p sys password            = database sys password"
+   echo "  -i init pfile              = parameter initialization file"
+   echo "  -p ssm parameter           = ssm parameter name to be updated"
+   echo "  -c catalog TNS string      = connection string to RMAN catalog (only required if duplicating from backup)"
+   echo ""
+   echo " Non-Parameterized Options:"
+   echo ""
+   echo "  -f will force a database duplication regardless of dataguard status"
+   echo "  -b will force a database duplication using a backup of the primary (default is to use active database duplication)"
+   echo "  -n no SBT type channels (used for Active Duplication or Disk-Based backups outside of AWS)"
    echo ""
    exit 1
 }
@@ -51,6 +62,21 @@ startup_mount_standby() {
 EOF
 }
 
+
+
+lookup_rman_catalog_password() {
+
+ info "Looking up passwords to in aws ssm parameter to restore by sourcing /etc/environment"
+  . /etc/environment
+
+  PRODUCT=`echo $HMPPS_ROLE`
+  SSMNAME="/${HMPPS_ENVIRONMENT}/${APPLICATION}/oracle-db-operation/rman/rman_password"
+  RMANPASS=`aws ssm get-parameters --region ${REGION} --with-decryption --name ${SSMNAME} | jq -r '.Parameters[].Value'`
+  [ -z ${RMANPASS} ] && echo  "Password for RMAN catalog in aws parameter store ${SSMNAME} does not exist"
+
+}
+
+
 lookup_db_sys_password() {
 
  info "Looking up passwords to in aws ssm parameter to restore by sourcing /etc/environment"
@@ -63,22 +89,105 @@ lookup_db_sys_password() {
 
 }
 
+get_primary_dbid () {
+  info "Getting DBID of Primary Database"
+  DBID=$(
+  sqlplus -s sys/${SYSPASS}@${PRIMARYDB} as sysdba << EOF
+      SET LINES 1000
+      SET PAGES 0
+      SET FEEDBACK OFF
+      SET HEADING OFF
+      WHENEVER SQLERROR EXIT FAILURE
+      SELECT dbid
+      FROM   v\$database;
+      EXIT
+EOF
+      )
+  [ $? -ne 0 ] && error "Primary database DBID is ${DBID}"
+}
+
+get_source_db_rman_details () {
+
+  X=`sqlplus -s rman19c/${RMANPASS}@"${CATALOG_TNS_STRING}" <<EOF
+      whenever sqlerror exit failure
+      set feedback off heading off verify off echo off
+
+      with completion_times as
+        (select max(d.next_change#)                           arch_scn
+          from rc_database a,
+               bs b,
+               rc_database_incarnation c,
+               rc_backup_archivelog_details d
+          where a.name = '${PRIMARYDB}'
+          and a.db_key=b.db_key
+          and a.db_key=c.db_key
+          and a.dbinc_key = c.dbinc_key
+          and b.bck_type is not null
+          and b.bs_key not in (select bs_key
+                              from rc_backup_controlfile
+                              where autobackup_date is not null
+                              or autobackup_sequence is not null)
+          and b.bs_key not in (select bs_key
+                              from  rc_backup_spfile)
+          and b.db_key=d.db_key(+)
+          and a.dbid = ${DBID}
+          and d.btype(+) = 'BACKUPSET'
+          and b.bs_key=d.btype_key(+)
+          group by a.dbid,b.bck_type)
+      select  'SCN='||to_char(max(arch_scn))
+      from completion_times;
+EOF
+`
+  eval $X
+  [ $? -ne 0 ] && error "Getting $PRIMARYDB rman details"
+  info "${PRIMARYDB} dbid = ${DBID}"
+  info "Restore SCN  = ${SCN}"
+}
+
+
 rman_duplicate_to_standby () {
 
   echo "run"                                                                > $RMANCMDFILE
   echo "{"                                                                  >> $RMANCMDFILE
   for (( i=1; i<=${CPU_COUNT}; i++ ))
   do
-    echo "  allocate channel ch${i} device type disk;"                      >> $RMANCMDFILE
+    if [[ "${USE_BACKUP}" != "TRUE" ]]
+    then
+         # Allocate Disk Channel if using Active Duplication
+         echo "  allocate channel ch${i} device type disk;"                      >> $RMANCMDFILE
+    else
+       # If using Backup based duplicate then must use Auxiliary channels instead of normal channels
+       if [[ "${NO_SBT_CHANNELS}" == "TRUE" ]]
+       then
+         # Allocate Disk Channel if using Active Duplication or Outside of AWS (Disk backups)
+         echo "  allocate auxiliary channel ch${i} device type disk;"                      >> $RMANCMDFILE
+       else
+         # Allocate SBT Channel if using a Backup inside AWS
+         echo "  allocate auxiliary channel c${i} device type sbt parms='SBT_LIBRARY=${ORACLE_HOME}/lib/libosbws.so, ENV=(OSB_WS_PFILE=${ORACLE_HOME}/dbs/osbws.ora)';" >>$RMANCMDFILE
+       fi
+    fi
   done
   for (( i=1; i<=${CPU_COUNT}; i++ ))
   do
     echo "  allocate auxiliary channel drch${i} device type disk;"          >> $RMANCMDFILE
   done
-  echo "  duplicate target database"                                        >> $RMANCMDFILE
-  echo "   for standby"                                                     >> $RMANCMDFILE
-  echo "   from active database"                                            >> $RMANCMDFILE
-  echo "    dorecover"                                                      >> $RMANCMDFILE
+
+  get_primary_dbid
+
+  if [[ "${USE_BACKUP}" != "TRUE" ]]
+  then
+      # Unless we have used the -b flag then we use Duplicate for Active Database
+      # Note than in AWS the use of Active Database Duplication may incur Regional
+      # Data Transfer charges.
+      echo "  duplicate target database"                                        >> $RMANCMDFILE
+      echo "   for standby"                                                     >> $RMANCMDFILE
+      echo "   from active database"                                            >> $RMANCMDFILE
+      echo "    dorecover"                                                      >> $RMANCMDFILE
+  else
+      echo "  duplicate database ${primarydb} dbid ${DBID}"                     >> $RMANCMDFILE
+      echo "   for standby"                                                     >> $RMANCMDFILE
+  fi
+
   echo "    spfile parameter_value_convert ('${primarydb}','${standbydb}')" >> $RMANCMDFILE
   echo "          set db_unique_name='${standbydb}'"                        >> $RMANCMDFILE
   echo "          set fal_server='${primarydb}'"                            >> $RMANCMDFILE
@@ -90,12 +199,30 @@ rman_duplicate_to_standby () {
   echo "          set dg_broker_config_file1='+DATA/${standbydb}/dg_broker1.dat'" >> $RMANCMDFILE
   echo "          set dg_broker_config_file2='+FLASH/${standbydb}/dg_broker2.dat'" >> $RMANCMDFILE
   echo "          set dg_broker_start='true'" >> $RMANCMDFILE
+  echo "          set standby_file_management='auto'" >> $RMANCMDFILE
+
+  if [[ "${USE_BACKUP}" == "TRUE" ]]
+  then
+      # If we are restoring from a backup, we must specify an SCN which will make the database consistent
+      # since we cannot enable flashbacking logging on an inconsistent database
+      lookup_rman_catalog_password
+      get_source_db_rman_details
+      echo "  until scn ${SCN}" >> $RMANCMDFILE  
+  fi
+
   echo "  nofilenamecheck;" >> $RMANCMDFILE
   echo "}" >> $RMANCMDFILE
 
   lookup_db_sys_password
-  rman target sys/${SYSPASS}@${PRIMARYDB} auxiliary sys/${SYSPASS}@${STANDBYDB} cmdfile $RMANCMDFILE log $RMANLOGFILE << EOF
+  if [[ "${USE_BACKUP}" != "TRUE" ]]
+  then
+     rman target sys/${SYSPASS}@${PRIMARYDB} auxiliary sys/${SYSPASS}@${STANDBYDB} cmdfile $RMANCMDFILE log $RMANLOGFILE << EOF
 EOF
+  else
+     # If we are duplicating from a backup then we need to connect to the RMAN catalog to get the backup manifest
+     rman auxiliary sys/${SYSPASS}@${STANDBYDB} catalog rman19c/${RMANPASS}@"${CATALOG_TNS_STRING}" cmdfile $RMANCMDFILE log $RMANLOGFILE << EOF
+EOF
+  fi
 
   info "Checking for errors"
   grep -i "ERROR MESSAGE STACK" $RMANLOGFILE >/dev/null 2>&1
@@ -106,7 +233,6 @@ EOF
 perform_recovery () {
   info "Check standby recovery"
   sqlplus -s / as sysdba << EOF
-    alter database close;
     alter database flashback on;
     alter database recover managed standby database disconnect;
     exit;
@@ -161,6 +287,38 @@ configure_rman () {
     CONFIGURE ARCHIVELOG DELETION POLICY TO APPLIED ON STANDBY;
 EOF
 }
+
+# At the time when the primary database was backed up (assuming non-Active Duplication) it may not have had
+# Standby Logfiles (e.g. if it had just been refreshed).   Therefore these would not automatically be created on the Standby.
+# We call this function to ensure that they are always in place.
+# (Slight variation on this code from pimary as cannot use subquery factoring on standby)
+create_standby_logfiles () {
+  info "Create standby log files"
+  sqlplus -s / as sysdba << EOF
+  set head off pages 1000 feed off
+  declare
+    cursor c1 is
+      select 'alter database add standby logfile thread 1 group '||rn||' size '||mb cmd
+          from ( select cnt, mg, mb, rownum as rn
+                 from (select count(*) as cnt, max(group#) as mg, max(bytes) as mb from v\$log)
+                 connect by level <= ((mg)+(cnt)+1))
+      where rn > mg
+      and rn not in (select group# from v\$standby_log);
+
+      sql_stmt varchar2(400);
+
+  begin
+    for r1 in c1
+    loop
+      sql_stmt := r1.cmd;
+      execute immediate sql_stmt;
+    end loop;
+  end;
+  /
+EOF
+  [ $? -ne 0 ] && error "Creating standby log files" || info "Created standby log files"
+}
+
 
 remove_orphaned_archive () {
   info "Remove orphaned archived redo logs"
@@ -270,7 +428,7 @@ info "Retrieving arguments"
 TARGETDB=UNSPECIFIED
 SSM_PARAMETER=UNSPECIFIED
 
-while getopts "t:s:i:fp:" opt
+while getopts "t:s:i:p:c:fbn" opt
 do
   case $opt in
     t) PRIMARYDB=$OPTARG ;;
@@ -278,6 +436,9 @@ do
     i) PARAMFILE=$OPTARG ;;
     f) FORCERESTORE=TRUE ;;
     p) SSM_PARAMETER=$OPTARG ;;
+    c) CATALOG_TNS_STRING=$OPTARG ;;
+    b) USE_BACKUP=TRUE ;;
+    n) NO_SBT_CHANNELS=TRUE ;;
     *) usage ;;
   esac
 done
@@ -287,6 +448,17 @@ info "SSM parameter    = $SSM_PARAMETER"
 if [[ "${FORCERESTORE}" == "TRUE" ]];
 then
    info "Force Restore selected"
+fi
+if [[ "${USE_BACKUP}" == "TRUE" ]]
+then  
+   if [[ -z ${CATALOG_TNS_STRING} ]]
+   then   
+      error "RMAN catalog connection required if using backup"
+   else  
+      info "Using Restore from Backup of primary"
+   fi
+else
+   info "Using Active Database Duplication from primary"
 fi
 
 primarydb=`echo "${PRIMARYDB}" | tr '[:upper:]' '[:lower:]'`
@@ -301,49 +473,60 @@ standbydb=`echo "${STANDBYDB}" | tr '[:upper:]' '[:lower:]'`
 mkdir -p /u01/app/oracle/admin/${standbydb}/adump
 [ $? -ne 0 ] && error "Creating the audit directory"
 
-# Check if standby database configured in dgbroker
+# Check if standby database configured in dgbroker (but only if we are not going to force a build anyway otherwise it is a waste of time)
 set_ora_env ${STANDBYDB}
-dgmgrl /  "show configuration" | grep "Physical standby database"  | grep "${standbydb}" > /dev/null
-PHYSICAL_STANDBY_CONFIG=$?
 
-if [[ ${PHYSICAL_STANDBY_CONFIG} -eq 0 ]];
+if [[ "${FORCERESTORE}" != "TRUE" ]]
 then
-  info "${standbydb} already configured in dgbroker"
-else
-  info "${standbydb} not configured in dgbroker"
+
+    dgmgrl /  "show configuration" | grep "Physical standby database"  | grep "${standbydb}" > /dev/null
+    PHYSICAL_STANDBY_CONFIG=$?
+
+    if [[ ${PHYSICAL_STANDBY_CONFIG} -eq 0 ]];
+    then
+      info "${standbydb} already configured in dgbroker"
+    else
+      info "${standbydb} not configured in dgbroker"
+    fi
+
+    # Check if ORA-16700 error code associated with standby (requires rebuild)
+    dgmgrl /  "show database ${standbydb}" | grep "ORA-16700: the standby database has diverged from the primary database" > /dev/null
+    PHYSICAL_STANDBY_DIVERGENCE=$?
+
+    if [[ ${PHYSICAL_STANDBY_DIVERGENCE} -eq 0 ]];
+    then
+      info "${standbydb} has diverged from the primary database"
+    fi
+
+    # Check if ORA-16766 error code associated with standby (requires rebuild)
+    dgmgrl /  "show database ${standbydb}" | grep "ORA-16766: Redo Apply is stopped" > /dev/null
+    REDO_APPLY_STOPPED=$?
+
+    if [[ ${REDO_APPLY_STOPPED} -eq 0 ]];
+    then
+      info "${standbydb} redo apply has stopped when it should have been running"
+    fi
+
+    # Check if ORA-16603 error code associated with standby (configuration ID mismatch)
+    dgmgrl /  "show database ${standbydb}" | grep "ORA-16603: Data Guard broker detected a mismatch in configuration ID" > /dev/null
+    DG_CONFIGURATION_MISMATCH=$?
+
+    if [[ ${DG_CONFIGURATION_MISMATCH} -eq 0 ]];
+    then
+      info "${standbydb} has a mismatched dataguard configuration"
+    fi
+
+    if [[ ${PHYSICAL_STANDBY_CONFIG} -eq 0 && ${PHYSICAL_STANDBY_DIVERGENCE} -ge 1 && ${REDO_APPLY_STOPPED} -ge 1 && ${DG_CONFIGURATION_MISMATCH} -ge 1  ]];
+    then
+      info "${standbydb} already configured in dgbroker, can assume no duplicate required"
+    else
+      info "forcing rebuild to clear error"
+      FORCERESTORE=TRUE
+    fi
 fi
 
-# Check if ORA-16700 error code associated with standby (requires rebuild)
-dgmgrl /  "show database ${standbydb}" | grep "ORA-16700: the standby database has diverged from the primary database" > /dev/null
-PHYSICAL_STANDBY_DIVERGENCE=$?
-
-if [[ ${PHYSICAL_STANDBY_DIVERGENCE} -eq 0 ]];
+if [[ "${FORCERESTORE}" == "TRUE" ]]
 then
-  info "${standbydb} has diverged from the primary database"
-fi
-
-# Check if ORA-16766 error code associated with standby (requires rebuild)
-dgmgrl /  "show database ${standbydb}" | grep "ORA-16766: Redo Apply is stopped" > /dev/null
-REDO_APPLY_STOPPED=$?
-
-if [[ ${REDO_APPLY_STOPPED} -eq 0 ]];
-then
-  info "${standbydb} redo apply has stopped when it should have been running"
-fi
-
-# Check if ORA-16603 error code associated with standby (configuration ID mismatch)
-dgmgrl /  "show database ${standbydb}" | grep "ORA-16603: Data Guard broker detected a mismatch in configuration ID" > /dev/null
-DG_CONFIGURATION_MISMATCH=$?
-
-if [[ ${DG_CONFIGURATION_MISMATCH} -eq 0 ]];
-then
-  info "${standbydb} has a mismatched dataguard configuration"
-fi
-
-if [[ ${PHYSICAL_STANDBY_CONFIG} -eq 0 && ${PHYSICAL_STANDBY_DIVERGENCE} -ge 1 && ${REDO_APPLY_STOPPED} -ge 1 && ${DG_CONFIGURATION_MISMATCH} -ge 1 && "${FORCERESTORE}" != "TRUE" ]];
-then
-  info "${standbydb} already configured in dgbroker, can assume no duplicate required"
-else
 
   # Shutdown standby instance and remove standby database from DATA and FLASH asm diskgroups
   remove_asm_directories
@@ -363,6 +546,12 @@ else
   # Add to CRS
   create_asm_spfile
   add_to_crs
+
+  # Ensure Standby Log files exist if restoring from a backup
+  if [[ "${USE_BACKUP}" == "TRUE" ]]
+  then  
+     create_standby_logfiles
+  fi
 
   # Perform recovery
   perform_recovery

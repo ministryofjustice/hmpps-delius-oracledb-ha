@@ -7,6 +7,26 @@
     update_ssm_parameter_restore: false
     post_restore: false
 
+- name: (main) Check primary DB has enough processes to run Archiving and FAL Server
+  script: get_log_archive_max_processes.sh
+  register: get_log_archive_max_processes
+  changed_when: false
+  delegate_to: "{{ groups[primary][0] }}"
+  become: true
+  become_user: "{{ rdbms_service_user.name }}"
+  run_once: True
+
+- name: (main) Report parameter values
+  debug:
+     msg: "log_archive_max_processes is {{ get_log_archive_max_processes.stdout | int }}.  Minimum required is {{ ((( high_availability_count | default(1) | int )*4)+4) }}."
+
+# We do not set log_archive_max_processes parameter automatically as we wish to provide flexibility to set it differently
+# for different environments.   It should instead be definied within database_parameters in hmpps-env-configs
+- name: (main) Abort if this parameter is too low for the number of destinations requested
+  fail:
+     msg: "log_archive_max_processes is too low for the number of archive destinations requested"
+  when:  ( get_log_archive_max_processes.stdout | int ) < ((( high_availability_count | default(1) | int )*4)+4)
+       
 - name: (main) Set fact to decide whether to update ssm parameter post rman duplicate
   set_fact:
     update_ssm_parameter_restore: true
