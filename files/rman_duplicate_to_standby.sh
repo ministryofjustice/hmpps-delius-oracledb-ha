@@ -220,8 +220,17 @@ rman_duplicate_to_standby () {
 EOF
   else
      # If we are duplicating from a backup then we need to connect to the RMAN catalog to get the backup manifest
-     rman auxiliary sys/${SYSPASS}@${STANDBYDB} catalog rman19c/${RMANPASS}@"${CATALOG_TNS_STRING}" cmdfile $RMANCMDFILE log $RMANLOGFILE << EOF
+     if [[ "${NO_SBT_CHANNELS}" == "TRUE" ]]
+     then
+        # If the backup is disk based then we must NOT connect to the target DB (an error is thrown if connecting)
+        rman auxiliary sys/${SYSPASS}@${STANDBYDB} catalog rman19c/${RMANPASS}@"${CATALOG_TNS_STRING}" cmdfile $RMANCMDFILE log $RMANLOGFILE << EOF
 EOF
+     else
+        # If the backup is SBT based then we must connect to the target DB.
+        # (This should not be necessary according to the Oracle documentation but it cannot find the SPFILE when tried without it)
+        rman auxiliary sys/${SYSPASS}@${STANDBYDB} catalog rman19c/${RMANPASS}@"${CATALOG_TNS_STRING}" target sys/${SYSPASS}@${PRIMARYDB} cmdfile $RMANCMDFILE log $RMANLOGFILE << EOF
+EOF
+     fi
   fi
 
   info "Checking for errors"

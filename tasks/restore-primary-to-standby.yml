@@ -78,7 +78,11 @@
     - name: (main/restore-primary-to-standby) Set No SBT flag if Active Duplicate or not inside AWS
       set_fact:
         no_sbt_flag: "-n"
-      when: (not is_aws_environment) or  ( primary_source_type | default('active') )  == 'backup'
+      when: (not is_aws_environment) or  ( primary_source_type | default('active') )  == 'active'
+
+    - name: (main/restore-primary-to-standby) Report Script Run Command
+      debug:
+         msg: "Running: /tmp/rman_duplicate_to_standby.sh {{ use_backup_flag | default('') }} {{ no_sbt_flag | default('') }} {{ force_restore_flag | default('') }} -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }} -i {{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg {{ ssm_parameter_option|default() }}"
 
     - name: (main/restore-primary-to-standby) Run rman restore bash script
       shell: ". ~/.bash_profile; /tmp/rman_duplicate_to_standby.sh {{ use_backup_flag | default('') }} {{ no_sbt_flag | default('') }} {{ force_restore_flag | default('') }} -t {{ database_primary_unique_name }} -s {{ database_standby_unique_name }} -i {{ oracle_database_oracle_home }}/dbs/init{{ database_standby_sid}}.ora_predg {{ ssm_parameter_option|default() }}"
