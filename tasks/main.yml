@@ -54,6 +54,7 @@
 
     - name: (main) Configure FSFO
       include: set-fsfo.yml
+      when: (fsfo_mode | default('disabled') | lower) != 'disabled'
       become: true
       become_user: "{{ rdbms_service_user.name }}"
       tags: fsfo
@@ -142,6 +143,7 @@
 
     - name: (main) Configure FSFO
       include: set-fsfo.yml
+      when: (fsfo_mode | default('disabled') | lower) != 'disabled'
       become: true
       become_user: "{{ rdbms_service_user.name }}"
       tags: fsfo
