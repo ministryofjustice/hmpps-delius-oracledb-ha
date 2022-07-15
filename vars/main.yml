@@ -14,3 +14,9 @@ database_primary_sid_name: "{{ hostvars[groups[primary][0]]['database_primary_si
 rdbms_service_user:
   name: oracle
   group: oinstall
+
+# Define conditions on which we wish to failover
+target_fsfo_health_conditions: ["Corrupted Controlfile","Corrupted Dictionary","Stuck Archiver","Datafile Write Errors","Inaccessible Logfile"]
+
+# Define the polling interval to the primary (seconds)
+target_fsfo_observer_reconnect: 60

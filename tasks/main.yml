@@ -1,5 +1,10 @@
 ---
 
+- debug: var=primary
+
+- debug: var=primary_host
+
+
 # tasks file for hmpps-delius-oracledb-ha
 
 - name: (main) Intialize variables
@@ -17,6 +22,28 @@
     post_restore: true
   when:  method is defined and method == "post"
 
+- name: (main) Set up oracle specific variables
+  block:
+    - name: (main) Set up oracle grid home
+      register: grid_home
+      shell: "grep +ASM /etc/oratab | cut -d: -f2"
+      changed_when: false
+    - name: (main) Set up oracle database home
+      register: oracle_home
+      shell: "grep {{ database_primary_sid_name}} /etc/oratab | cut -d: -f2"
+      run_once: True
+      changed_when: false
+    - set_fact:
+        oracle_database_oracle_home: "{{ oracle_home.stdout }}"
+        oracle_grid_oracle_home: "{{ grid_home.stdout }}"
+  tags: var
+
+- name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
+  set_fact:
+    standby_host_tns: "{{ standby_host | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
+    primary_host_tns: "{{ primary_host | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
+  tags: var
+
 - block:
     - name: (main) Configure Oracle data guard broker
       include: set-primary-dgbroker.yml
@@ -24,6 +51,12 @@
 
     - name: (main) Setup taf service name
       include: set-taf-service.yml
+
+    - name: (main) Configure FSFO
+      include: set-fsfo.yml
+      become: true
+      become_user: "{{ rdbms_service_user.name }}"
+      tags: fsfo
 
     - meta: end_play
   when: post_restore
@@ -40,12 +73,6 @@
 - name: (main/set-primary-config) Gather facts with dns filter
   setup:
     filter: ansible_dns
-  tags: var
-
-- name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
-  set_fact:
-    standby_host_tns: "{{ standby_host | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
-    primary_host_tns: "{{ primary_host | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
   tags: var
 
 - name: (main) Load in our vars
@@ -85,20 +112,6 @@
   when: inventory_hostname in groups[ standby ]
   tags: stand  
 
-- name: (main) Set up oracle specific variables
-  block:
-    - name: (main) Set up oracle grid home
-      register: grid_home
-      shell: "grep +ASM /etc/oratab | cut -d: -f2"
-    - name: (main) Set up oracle database home
-      register: oracle_home
-      shell: "grep {{ database_primary_sid_name}} /etc/oratab | cut -d: -f2"
-      run_once: True
-    - set_fact:
-        oracle_database_oracle_home: "{{ oracle_home.stdout }}"
-        oracle_grid_oracle_home: "{{ grid_home.stdout }}"
-  tags: var
-
 - name: (main) Set standby configuration parameters
   include: set-standby-config.yml
   when: inventory_hostname in groups[ standby ]
@@ -126,4 +139,13 @@
     - name: (main) Setup taf service name
       include: set-taf-service.yml
       tags: taf
+
+    - name: (main) Configure FSFO
+      include: set-fsfo.yml
+      become: true
+      become_user: "{{ rdbms_service_user.name }}"
+      tags: fsfo
+
   when: not post_restore and not update_ssm_parameter_restore
+
+
