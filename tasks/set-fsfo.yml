@@ -25,7 +25,7 @@
 - name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
   set_fact:
     standby1: "{{ primary  | regex_replace('(.*)_primarydb$','\\1_standbydb1') }}"
-    standby2: "{{ primary  | regex_replace('(.*)_primarydb$','\\1_standbydb1') }}"
+    standby2: "{{ primary  | regex_replace('(.*)_primarydb$','\\1_standbydb2') }}"
 
 - name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
   set_fact:
@@ -96,6 +96,19 @@
   register: get_configuration_wide_service_name_in_wallet
   changed_when: false
 
+- name: Add Wallet Location to SQLNET Config
+  blockinfile:
+    create: yes
+    path: '{{ oracle_database_oracle_home }}/network/admin/sqlnet.ora'  
+    block: |
+
+      WALLET_LOCATION=(SOURCE=(METHOD=file)(METHOD_DATA=(DIRECTORY={{ wallet_dir }})))
+      SQLNET.WALLET_OVERRIDE=true
+
+    owner: "{{ rdbms_service_user.name }}"
+    group: "{{ rdbms_service_user.group }}"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK ADD DATA GUARD WALLET"
+
 - name: If Credential Exists Check that it Works
   shell: |
           . ~/.bash_profile
@@ -123,6 +136,48 @@
           . ~/.bash_profile
           mkstore -wrl {{ wallet_dir }} -createCredential {{ configuration_wide_service_name }} sys {{ get_sys_password.stdout }}
   when: ( get_configuration_wide_service_name_in_wallet.stdout | int ) == 0
+
+- name: Check if the Primary Database Unique Name is Already in the Wallet
+  shell: |
+          . ~/.bash_profile
+          mkstore -wrl {{ wallet_dir }} -listCredential | grep -c ": {{ hostvars[groups[ primary ][0]]['database_primary_unique'] }} sys$" | cat
+  register: database_in_wallet
+  changed_when: false
+
+- name: Add Primary Database Credentials to Wallet
+  shell: |
+          . ~/.bash_profile
+          mkstore -wrl {{ wallet_dir }} -createCredential {{ hostvars[groups[ primary ][0]]['database_primary_unique'] }} sys {{ get_sys_password.stdout }}
+  when: ( database_in_wallet.stdout | int ) == 0
+
+- name: Check if the 1st Standby Database Unique Name is Already in the Wallet
+  shell: |
+          . ~/.bash_profile
+          mkstore -wrl {{ wallet_dir }} -listCredential | grep -c ": {{ hostvars[groups[ standby1 ][0]]['database_standby_unique'] }} sys$" | cat
+  register: database_in_wallet
+  changed_when: false
+
+- name: Add 1st Standby Database Credentials to Wallet
+  shell: |
+          . ~/.bash_profile
+          mkstore -wrl {{ wallet_dir }} -createCredential {{ hostvars[groups[ standby1 ][0]]['database_standby_unique'] }} sys {{ get_sys_password.stdout }}
+  when: ( database_in_wallet.stdout | int ) == 0
+
+- name: Check if the Optional 2nd Standby Database Unique Name is Already in the Wallet
+  shell: |
+          . ~/.bash_profile
+          mkstore -wrl {{ wallet_dir }} -listCredential | grep -c ": {{ hostvars[groups[ standby2 ][0]]['database_standby_unique'] }} sys$" | cat
+  register: database_in_wallet
+  when: high_availability_count | int == 2
+  changed_when: false
+
+- name: Add Optional 2nd Standby Database Credentials to Wallet
+  shell: |
+          . ~/.bash_profile
+          mkstore -wrl {{ wallet_dir }} -createCredential {{ hostvars[groups[ standby2 ][0]]['database_standby_unique'] }} sys {{ get_sys_password.stdout }}
+  when: 
+     - ( database_in_wallet.stdout | int ) == 0
+     - high_availability_count | int == 2
 
 - name: Define Location for Observer Configuration
   set_fact:
@@ -219,7 +274,7 @@
 - name: Get Databases Currently in Configuration
   shell: |
          . ~/.bash_profile
-         dgmgrl  / "show configuration;" | awk '{if(flag==1){print $0}}/Members:/{flag=1}/^$/{flag=0}'
+         dgmgrl  / "show configuration;" | awk '/.* - .*database/{if(flag==1){print $0}}/Members:/{flag=1}/^Fast-Start Failover/{flag=0}'
   register: get_databases_in_configuration
   when: inventory_hostname in groups[ primary ]
   changed_when: false
@@ -339,13 +394,48 @@
   register: get_observer_hosts
   changed_when: false
 
-- name: Start Observing on this Host
-  script: start_observing.sh "{{observer_config_dir }}/observer.ora"
-  when:  ( (inventory_hostname in groups[ primary ]) and (primary_host_tns not in get_observer_hosts.stdout_lines) ) or
-         ( (inventory_hostname in groups[ standby ]) and (standby_number == '1') and (standby_host1_tns not in get_observer_hosts.stdout_lines) ) or
-         ( (inventory_hostname in groups[ standby ]) and (standby_number == '2') and (standby_host2_tns not in get_observer_hosts.stdout_lines) )
-         
+- debug: var=inventory_hostname
 
+- debug: 
+    msg: "G1: {{ groups [ standby1 ] }}"
+
+- debug: 
+    msg: "G2: {{ groups [ standby2 ] }}"
+
+- debug:
+     msg: "O: {{ get_observer_hosts.stdout_lines }}"
+
+- debug:
+     msg: "P: {{primary_host_tns}}"
+
+- debug:
+     msg: "S1: {{ standby_number }} {{ standby_host1_tns }}"
+
+- debug:
+     msg: "S2: {{ standby_number }} {{ standby_host2_tns }}"
+
+- name: Start 1st Standby Observer
+  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ hostvars[groups[ primary ][0]]['database_primary_sid'] }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
+  when: 
+      - inventory_hostname in groups[ standby1 ]
+      - standby_number | int == 1
+      - standby_host1_tns.split('.')[0] not in get_observer_hosts.stdout_lines
+
+- name: Start 2nd Standby Observer
+  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ hostvars[groups[ primary ][0]]['database_primary_sid'] }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
+  when: 
+      - inventory_hostname in groups[ standby2 ]
+      - standby_number | int == 2
+      - standby_host2_tns.split('.')[0] not in get_observer_hosts.stdout_lines
+
+# Observer on Primary is not initially useful but may be required following switchover or failover.
+# Set it to initially monitor the 1st Standby
+- name: Start Primary Observer
+  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
+  when: 
+      - inventory_hostname in groups[ primary ]
+      - primary_host_tns.split('.')[0] not in get_observer_hosts.stdout_lines
+        
 - name: Steps on Primary Only
   when: inventory_hostname in groups[ primary ]
   block:
@@ -363,14 +453,14 @@
                . ~/.bash_profile
                dgmgrl -silent / "disable fast_start failover"
         when:
-            - get_fast_start_failover.stdout | trim != 'Disabled'
+            - ( get_fast_start_failover.stdout | trim ) != 'Disabled'
             - ( (get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | lower == 'enabled') )
               or ( (not get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | lower == 'observe') )
 
       - name: Enable Observe-Only Mode
         shell: |
               . ~/.bash_profile
-              dgmgrl -silent / "enable fast start failover observe only"
+              dgmgrl -silent / "enable fast_start failover observe only"
         when:
             - not get_fast_start_failover.stdout is search("Observe-Only Mode")
             - fsfo_mode | lower == 'observe'
@@ -378,7 +468,7 @@
       - name: Enable FSFO Mode
         shell: |
               . ~/.bash_profile
-              dgmgrl -silent / "enable fast start failover observe only"
+              dgmgrl -silent / "enable fast_start failover"
         when:
             - get_fast_start_failover.stdout is search("Observe-Only Mode") or get_fast_start_failover.stdout is search("Disabled")
             - fsfo_mode | lower == 'enabled'
@@ -391,18 +481,13 @@
       - name: Move Master Observer to 1st Standby
         script: set_master_observer_host.sh "{{ observer_config_dir }}/observer.ora" {{ standby_host1_tns }}
         when: 
-           - get_master_observer_host.stdout != standby_host1_tns
+           - get_master_observer_host.stdout != standby_host1_tns.split('.')[0]
            - hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower in databases_in_configuration
 
       - name: Move Master Observer to 2nd Standby if 1st Standby Not Available
         script: set_master_observer_host.sh "{{ observer_config_dir }}/observer.ora" {{ standby_host2_tns }}
         when: 
-           - get_master_observer_host.stdout != standby_host2_tns
+           - get_master_observer_host.stdout != standby_host2_tns.split('.')[0]
            - not hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower in databases_in_configuration
            - hostvars[groups[ standby2 ][0]]['database_standby_sid'] | lower in databases_in_configuration
        
-# Must Run on Each Host Individually
-
-# (1) Check if Observer is Running on this Host
-
-# (2) Start Observing
