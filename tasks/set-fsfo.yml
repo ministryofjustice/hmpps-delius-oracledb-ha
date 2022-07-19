@@ -394,26 +394,6 @@
   register: get_observer_hosts
   changed_when: false
 
-- debug: var=inventory_hostname
-
-- debug: 
-    msg: "G1: {{ groups [ standby1 ] }}"
-
-- debug: 
-    msg: "G2: {{ groups [ standby2 ] }}"
-
-- debug:
-     msg: "O: {{ get_observer_hosts.stdout_lines }}"
-
-- debug:
-     msg: "P: {{primary_host_tns}}"
-
-- debug:
-     msg: "S1: {{ standby_number }} {{ standby_host1_tns }}"
-
-- debug:
-     msg: "S2: {{ standby_number }} {{ standby_host2_tns }}"
-
 - name: Start 1st Standby Observer
   script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ hostvars[groups[ primary ][0]]['database_primary_sid'] }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
   when: 
