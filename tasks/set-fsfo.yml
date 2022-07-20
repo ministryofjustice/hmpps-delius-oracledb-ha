@@ -29,7 +29,7 @@
 - name: Fix Undefined Configuration-Wide Service Name
   when: 
       - inventory_hostname in groups[ primary ]
-      - get_ConfigurationWideServiceName.stdout_lines[-1] | replace(\"'\",'') |  trim == ''
+      - ( get_ConfigurationWideServiceName.stdout_lines[-1] | replace("'",'') |  trim ) == ''
   run_once: true
   block:
 
@@ -264,7 +264,7 @@
         shell: |               
               . ~/.bash_profile
               dgmgrl -silent  / 'edit configuration set property ObserverReconnect = {{ target_fsfo_observer_reconnect }};'
-        when: ( target_fsfo_observer_reconnect | int ) != ( current_observer_reconnect )
+        when: ( target_fsfo_observer_reconnect | int ) != ( current_observer_reconnect | int )
 
       # All databases which have a standby are run in Maximum Availability Mode
       - name: Get Protection Mode
@@ -327,6 +327,15 @@
         when: 
           - inventory_hostname in groups[ primary ]
           - ( databases_in_configuration | length ) == 3
+          - databases_in_configuration[1] < databases_in_configuration[2]
+
+      - name: Determine Required FSFO Targets for Primary (Double Standby)
+        set_fact:
+          fsfo_targets: "{{ databases_in_configuration[2] }},{{ databases_in_configuration[1] }}"
+        when: 
+          - inventory_hostname in groups[ primary ]
+          - ( databases_in_configuration | length ) == 3
+          - databases_in_configuration[2] < databases_in_configuration[1]
 
       - name: Determine Required FSFO Targets for New First Standby
         set_fact:
@@ -412,24 +421,92 @@
         when: (fsfo_targets | lower ) != (  "hostvars[groups[ primary ][0]]['database_primary_sid'] }},{{ hostvars[groups[ standby1 ][0]]['database_standby_sid']" | lower )
         delegate_to:  "{{ hostvars[groups[ standby2 ][0]]['inventory_hostname'] }}"
 
-- name: Get Hostname of Observers
-  script: get_observer_hosts.sh "{{ observer_config_dir }}/observer.ora"
-  register: get_observer_hosts
-  changed_when: false
+- name: Check Observers from Primary
+  when: inventory_hostname in groups[ primary ]
+  run_once: true
+  block:
+
+      - name: Get Location of Observers
+        script: get_observer_hosts.sh "{{ observer_config_dir }}/observer.ora"
+        register: get_observer_hosts
+        changed_when: false
+
+      - name: Initialize Observer List
+        set_fact:
+            observer_dict: {}
+
+      - name: Populate Observer Dictionary
+        set_fact:
+            observer_dict: "{{ observer_dict | combine({item.split(' ')[0]: {'type': item.split(' ')[1], 'hostname': item.split(' ')[2]}}) }}"
+        loop: "{{ get_observer_hosts.stdout_lines }}"
+
+      - name: Stop Any Backup Observers Co-Located on Master (Want Only One per AZ)
+        shell: |
+              . ~/.bash_profile
+              dgmgrl / "stop observer {{ item }};"
+        loop: "{{ observer_dict.keys() }}"
+        register: stop_colocate_master
+        when: 
+            - observer_dict[item].type == 'Backup'
+            - observer_dict[item].hostname == ( observer_dict | dict2items | json_query('[?value.type==`Master`].value.hostname') )
+
+      # Stop Arbitrary Co-Located Observer (We do not want to stop both Observers when they running on one host - just one of them)
+      - name: Stop Any Backup Observers Co-Located on Another Backup (Want Only One per AZ)
+        shell: |
+              . ~/.bash_profile
+              dgmgrl / "stop observer {{ item }};"
+        loop: "{{ observer_dict.keys() }}"
+        register: stop_colocate_backup
+        when: 
+            - observer_dict[item].type == 'Backup'
+            - observer_dict[item].hostname == ( observer_dict | dict2items | json_query('[?value.type==`Master`].value.hostname') )
+            - item | hash('sha1') > ( observer_dict | dict2items | json_query('[?value.type==`Master`].key' | hash('sha1') )
+
+# If any Observers have been stopped, refresh the dictionary of observers
+- name: Refresh Observers After Stop
+  when:
+      - stop_colocate_master.changed or stop_colocate_backup.changed
+      - inventory_hostname in groups[ primary ]
+  run_once: true
+  block:
+
+      - name: Get Location of Observers
+        script: get_observer_hosts.sh "{{ observer_config_dir }}/observer.ora"
+        register: get_observer_hosts
+        changed_when: false
+
+      - name: Re-Initialize Observer Dictionary
+        set_fact:
+            observer_dict: {}
+
+      - name: Populate Observer Dictionary
+        set_fact:
+            observer_dict: "{{ observer_dict | combine({item.split(' ')[0]: {'type': item.split(' ')[1], 'hostname': item.split(' ')[2]}}) }}"
+        loop: "{{ get_observer_hosts.stdout_lines }}"
+
+# We require the hostname as supplied by the hostname command as this is what is used by the Data Guard Broker to identify hosts
+- name: Get Hostname
+  shell: |
+         hostname
+  register: get_hostname
+
+- name: Set Hostname
+  set_fact:
+      my_hostname: "{{ get_hostname.stdout }}"
 
 - name: Start 1st Standby Observer
   script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ hostvars[groups[ primary ][0]]['database_primary_sid'] }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
   when: 
       - inventory_hostname in groups[ standby1 ]
       - standby_number | int == 1
-      - standby_host1_tns.split('.')[0] not in get_observer_hosts.stdout_lines
+      - my_hostname not in ( observer_dict | map(attribute='hostname' | list )
 
 - name: Start 2nd Standby Observer
   script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ hostvars[groups[ primary ][0]]['database_primary_sid'] }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
   when: 
       - inventory_hostname in groups[ standby2 ]
       - standby_number | int == 2
-      - standby_host2_tns.split('.')[0] not in get_observer_hosts.stdout_lines
+      - my_hostname not in ( observer_dict | map(attribute='hostname' | list )
 
 # Observer on Primary is not initially useful but may be required following switchover or failover.
 # Set it to initially monitor the 1st Standby
@@ -437,7 +514,7 @@
   script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
   when: 
       - inventory_hostname in groups[ primary ]
-      - primary_host_tns.split('.')[0] not in get_observer_hosts.stdout_lines
+      - my_hostname not in ( observer_dict | map(attribute='hostname' | list )
         
 - name: Steps on Primary Only
   when: inventory_hostname in groups[ primary ]
