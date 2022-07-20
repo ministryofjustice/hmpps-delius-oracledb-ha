@@ -29,7 +29,7 @@
 - name: Fix Undefined Configuration-Wide Service Name
   when: 
       - inventory_hostname in groups[ primary ]
-      - configuration_wide_service_name == ''
+      - get_ConfigurationWideServiceName.stdout_lines[-1] | replace(\"'\",'') |  trim == ''
   run_once: true
   block:
 
