@@ -1,24 +1,46 @@
-- name: Get Configuration Name
-  shell: |
-         . ~/.bash_profile
-         dgmgrl -silent  / "show configuration;" | grep "^Configuration - " | cut -f3 -d' '
-  register: get_ConfigurationName
-  changed_when: false
 
-- name: Set Configuration Name
-  set_fact:
-      configuration_name: "{{ get_ConfigurationName.stdout | trim }}"
+- name: Steps on Primary Only
+  when: inventory_hostname in groups[ primary ]
+  run_once: true
+  block:
 
-- name: Get Configuration-Wide Service Name
-  shell: |
-         . ~/.bash_profile
-         dgmgrl  / "show configuration ConfigurationWideServiceName" | awk -F= '{print $2}'
-  register: get_ConfigurationWideServiceName
-  changed_when: false
+      - name: Get Configuration Name
+        shell: |
+              . ~/.bash_profile
+              dgmgrl -silent  / "show configuration;" | grep "^Configuration - " | cut -f3 -d' '
+        register: get_ConfigurationName
+        changed_when: false
 
-- name: Set Configuration-Wide Service Name
-  set_fact:
-      configuration_wide_service_name: "{{ get_ConfigurationWideServiceName.stdout_lines[-1] | replace(\"'\",'') |  trim }}"
+      - name: Set Configuration Name
+        set_fact:
+            configuration_name: "{{ get_ConfigurationName.stdout | trim }}"
+
+      - name: Get Configuration-Wide Service Name
+        shell: |
+              . ~/.bash_profile
+              dgmgrl  / "show configuration ConfigurationWideServiceName" | awk -F= '{print $2}'
+        register: get_ConfigurationWideServiceName
+        changed_when: false
+
+      - name: Set Configuration-Wide Service Name
+        set_fact:
+            configuration_wide_service_name: "{{ get_ConfigurationWideServiceName.stdout_lines[-1] | replace(\"'\",'') |  trim }}"
+  
+- name: Fix Undefined Configuration-Wide Service Name
+  when: 
+      - inventory_hostname in groups[ primary ]
+      - configuration_wide_service_name == ''
+  run_once: true
+  block:
+
+      - name: Set New Configuration-Wide Service Name
+        set_fact:
+             configuration_wide_service_name: "{{ database_primary_unique }}_CFG"
+
+      - name: Configure Configuration-Wide Service Name
+        shell: |
+              . ~/.bash_profile
+              dgmgrl  / "edit configuration set property ConfigurationWideServiceName='{{ configuration_wide_service_name }}'"
 
 - debug: var=high_availability_count
 
@@ -66,6 +88,7 @@
     . ~/.bash_profile
     echo $ORACLE_BASE
   register: oracle_base_result
+  run_once: true
   changed_when: false  
 
 - name: Set Oracle Base
