@@ -1,9 +1,6 @@
 ---
 
-- debug: var=primary
-
-- debug: var=primary_host
-
+- debug: var=fsfo_mode
 
 # tasks file for hmpps-delius-oracledb-ha
 
