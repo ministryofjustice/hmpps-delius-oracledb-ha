@@ -1,7 +1,5 @@
 ---
 
-- debug: var=fsfo_mode
-
 # tasks file for hmpps-delius-oracledb-ha
 
 - name: (main) Intialize variables
