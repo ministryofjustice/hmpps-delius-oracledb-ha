@@ -436,14 +436,14 @@
         set_fact:
             observer_dict: {}
 
-      - debug: var=get_observer_hosts
-
-      - debug: var=get_observer_hosts.stdout_lines
-
+      # When run in CodeBuild the output of the get_observer_hosts.sh script includes the Ansible BECOME-SUCCESS marker when there are no Observers for unclear reasons.
+      # This does not happen when run locally so is difficult to debug.   As a workaround we simply ignore the output if it contains BECOME-SUCCESS-
+      # This marker does not appear when Observers do exist.
       - name: Populate Observer Dictionary
         set_fact:
             observer_dict: "{{ observer_dict | combine({item.split(' ')[0]: {'observer_name': item.split(' ')[0], 'type': item.split(' ')[1], 'hostname': item.split(' ')[2]}}) }}"
         loop: "{{ get_observer_hosts.stdout_lines | default([]) }}"
+        when: not get_observer_hosts.stdout is search ("BECOME-SUCCESS-")
 
       - name: Stop Any Backup Observers Co-Located on Master (Want Only One per AZ)
         shell: |
@@ -488,6 +488,7 @@
         set_fact:
             observer_dict: "{{ observer_dict | combine({item.split(' ')[0]: {'observer_name': item.split(' ')[0], 'type': item.split(' ')[1], 'hostname': item.split(' ')[2]}}) }}"
         loop: "{{ get_observer_hosts.stdout_lines | default([])  }}"
+        when: not get_observer_hosts.stdout is search ("BECOME-SUCCESS")
 
 # We require the hostname as supplied by the hostname command as this is what is used by the Data Guard Broker to identify hosts
 - name: Get Hostname
