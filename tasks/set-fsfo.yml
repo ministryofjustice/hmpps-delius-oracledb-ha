@@ -436,6 +436,10 @@
         set_fact:
             observer_dict: {}
 
+      - debug: var=get_observer_hosts
+
+      - debug: var=get_observer_hosts.stdout_lines
+
       - name: Populate Observer Dictionary
         set_fact:
             observer_dict: "{{ observer_dict | combine({item.split(' ')[0]: {'observer_name': item.split(' ')[0], 'type': item.split(' ')[1], 'hostname': item.split(' ')[2]}}) }}"
