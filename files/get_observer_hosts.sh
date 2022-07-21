@@ -11,6 +11,3 @@ set ObserverConfigFile=${OBSERVER_CONFIG_FILE}
 show observers;
 exit;
 EODG
-
-# Do not use grep return code
-exit 0
