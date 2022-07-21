@@ -8,5 +8,4 @@ OBSERVER_CONFIG_FILE=$1
 dgmgrl /<<EODG
 set ObserverConfigFile=${OBSERVER_CONFIG_FILE};
 show observers;
-exit;
 EODG
