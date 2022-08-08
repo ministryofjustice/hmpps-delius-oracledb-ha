@@ -136,21 +136,12 @@
           echo exit | sqlplus -S -L /@{{ configuration_wide_service_name }} as sysdba
   register: check_password
   ignore_errors: True
-  when: ( get_configuration_wide_service_name_in_wallet.stdout | int ) > 1
+  when: ( get_configuration_wide_service_name_in_wallet.stdout | int ) > 0
 
 - name: Get sys password from ssm parameter store
   shell: . /etc/environment && aws ssm get-parameters --region ${REGION} --with-decryption --name /${HMPPS_ENVIRONMENT}/${APPLICATION}/${HMPPS_ROLE}-database/db/oradb_sys_password | jq -r '.Parameters[].Value'
   register: get_sys_password
   changed_when: false
-  when: (( get_configuration_wide_service_name_in_wallet.stdout | int ) == 0) or (( check_password.rc | default(1)) > 0)
-
-- name: Update Existing Wallet Credentials with New Password
-  shell: |
-          . ~/.bash_profile
-          mkstore -wrl {{ wallet_dir }} -modifyCredential {{ configuration_wide_service_name }} sys {{ get_sys_password.stdout }}
-  when:
-      - ( get_configuration_wide_service_name_in_wallet.stdout | int ) > 1
-      - ( check_password.rc | default(1)) > 0
 
 - name: Add Configuration-Wide Service Credentials to Wallet
   shell: |
@@ -199,6 +190,30 @@
   when: 
      - ( database_in_wallet.stdout | int ) == 0
      - high_availability_count | int == 2
+
+# All Credentials Should Now Be In the Wallet - Update Pre-Existing Ones if Needed
+- name: Initialize List of Data Guard Credentials
+  set_fact:
+      data_guard_credentials: "{{ [hostvars[groups[ primary ][0]]['database_primary_unique'] + '_CFG', hostvars[groups[ primary ][0]]['database_primary_unique']] }}"
+
+- name: Add 1st Standby to Credentials List Where it Exists
+  set_fact:
+      data_guard_credentials: "{{ data_guard_credentials + [ hostvars[groups[ standby1 ][0]]['database_standby_unique'] ] }}"
+  when: high_availability_count | int >= 1
+
+- name: Add Optional 2nd Standby to Credentials List Where it Exists
+  set_fact:
+      data_guard_credentials: "{{ data_guard_credentials + [ hostvars[groups[ standby2 ][0]]['database_standby_unique']  ] }}"
+  when: high_availability_count | int == 2
+
+- debug: var=data_guard_credentials
+
+- name: Update Password in Data Guard Wallet
+  include: update_data_guard_wallet_credentials.yml
+  vars:
+    credential_name: "{{ item }}"
+    sys_password: "{{ get_sys_password.stdout }}"
+  loop: "{{ data_guard_credentials }}"    
 
 - name: Define Location for Observer Configuration
   set_fact:
@@ -501,14 +516,14 @@
       my_hostname: "{{ get_hostname.stdout }}"
 
 - name: Start 1st Standby Observer
-  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ hostvars[groups[ primary ][0]]['database_primary_sid'] }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
+  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ configuration_wide_service_name }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
   when: 
       - inventory_hostname in groups[ standby1 ]
       - standby_number | int == 1
       - my_hostname not in ( observer_dict.values() | map(attribute='hostname') | list )
 
 - name: Start 2nd Standby Observer
-  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ hostvars[groups[ primary ][0]]['database_primary_sid'] }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
+  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ configuration_wide_service_name }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
   when: 
       - inventory_hostname in groups[ standby2 ]
       - standby_number | int == 2
@@ -517,7 +532,7 @@
 # Observer on Primary is not initially useful but may be required following switchover or failover.
 # Set it to initially monitor the 1st Standby
 - name: Start Primary Observer
-  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
+  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ configuration_wide_service_name }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
   when: 
       - inventory_hostname in groups[ primary ]
       - my_hostname not in ( observer_dict.values() | map(attribute='hostname') | list )
