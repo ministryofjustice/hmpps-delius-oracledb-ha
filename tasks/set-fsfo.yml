@@ -1,3 +1,20 @@
+- name: Detect Missing Wallet
+  shell: |
+        . ~/.bash_profile
+        dgmgrl  -silent / "exit"
+  register: detect_missing_wallet
+  ignore_errors: True
+  changed_when: false
+
+# If there is a problem with the wallet we will need to create it, but first 
+# need to ensure that the existing SQL Net configuration is no longer trying
+# to use it, otherwise we will be unable to use the dgmgrl utility
+- name: Remove Pre-existing Wallet Configuration
+  blockinfile:
+    state: absent
+    path: '{{ oracle_database_oracle_home }}/network/admin/tnsnames.ora'  
+    marker: "# {mark} ANSIBLE MANAGED BLOCK ADD DATA GUARD WALLET"
+  when: detect_missing_wallet.stderr is search('.*ORA-12578.*')
 
 - name: Steps on Primary Only
   delegate_to: "{{ groups[ primary ][0] }}"
@@ -78,7 +95,7 @@
        )
     owner: "{{ rdbms_service_user.name }}"
     group: "{{ rdbms_service_user.group }}"
-    marker: "# {mark} ANSIBLE MANAGED BLOCK ADD {{ configuration_wide_service_name }}"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK ADD CONFIGURATION-WIDE SERVICE NAME"
 
 - name: Get Oracle Base
   shell: |
