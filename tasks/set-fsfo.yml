@@ -28,7 +28,7 @@
         
       # Do not use configuration_wide_service_name in the when conditition as it will mutate before the end of the block
       - name: Fix Undefined Configuration-Wide Service Name
-        when: ( get_ConfigurationWideServiceName.stdout_lines[-1] | | default('') | replace("'",'') |  trim ) == ''
+        when: ( get_ConfigurationWideServiceName.stdout_lines[-1] | default('') | replace("'",'') |  trim ) == ''
         block:
 
             - name: Set New Configuration-Wide Service Name
