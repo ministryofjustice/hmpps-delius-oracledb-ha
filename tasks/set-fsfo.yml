@@ -508,12 +508,17 @@
      - my_hostname == ( observer_dict | dict2items | json_query('[?value.type==`Master`].value.hostname') | first | default('none') )
      - ( password_update_count | int ) > 0
 
+- debug: 
+     msg: "{{ observer_dict | dict2items | json_query('[?value.hostname==`' + my_hostname + '`].value.observer_name') | list }}"
+
 # Stop all the Observers on this host if the password has been changed to then allow it to restart with the new password
 # Note that the stopping of Observers can take a long time to complete
 - name: Stop Observers if Password Changed
   script: stop_observer.sh "{{ observer_config_dir }}/observer.ora" "{{ item }}"
   loop: "{{ observer_dict | dict2items | json_query('[?value.hostname==`' + my_hostname + '`].value.observer_name') | list }}"
-  when: ( password_update_count | int ) > 0
+  when: 
+    - ( password_update_count | int ) > 0
+    - ( item | length ) > 1
   vars:
     ansible_aws_ssm_timeout: 1800
 
