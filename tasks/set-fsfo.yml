@@ -466,7 +466,7 @@
 
 - name: Set 1st Standby Hostname
   set_fact:
-      my_hostname "{{ get_hostname_1st_standby.stdout }}" 
+      my_hostname: "{{ get_hostname_1st_standby.stdout }}" 
   delegate_to: "{{ groups[ standby1 ][0] }}"    
   delegate_facts: true
   run_once: true
