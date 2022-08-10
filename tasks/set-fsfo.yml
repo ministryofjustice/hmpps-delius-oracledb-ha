@@ -471,7 +471,7 @@
     - ( password_update_count | int ) > 0
     - ( item | length ) > 1
   vars:
-    ansible_aws_ssm_timeout: 1800
+    ansible_aws_ssm_timeout: 600
 
 # If any Observers have been stopped, refresh the dictionary of observers
 - name: Refresh Observers After Stop
