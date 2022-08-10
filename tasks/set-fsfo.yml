@@ -461,6 +461,9 @@
   run_once: true
   changed_when: false
 
+- debug:
+    msg: "Hostname 1st Standby: {{ get_hostname_1st_standby.stdout }}"
+
 - name: Set 1st Standby Hostname
   set_fact:
       my_hostname "{{ get_hostname_1st_standby.stdout }}" 
