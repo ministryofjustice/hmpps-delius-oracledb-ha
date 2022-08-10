@@ -445,10 +445,28 @@
   shell: |
          hostname
   register: get_hostname
+  changed_when: false
 
 - name: Set Hostname
   set_fact:
       my_hostname: "{{ get_hostname.stdout }}"
+
+# Even if we are running a build on Standby #2 we still need to know the hostname of Standby #1 as this is the preferred target
+# for the Master Observer.    Therefore we gather this hostname explictly and delegate the fact.
+- name: Get 1st Standby Hostname
+  shell: | 
+         hostname
+  register: get_hostname_1st_standby
+  delegate_to: "{{ groups[ standby1 ][0] }}"
+  run_once: true
+  changed_when: false
+
+- name: Set 1st Standby Hostname
+  set_fact:
+      my_hostname "{{ get_hostname_1st_standby.stdout }}" 
+  delegate_to: "{{ groups[ standby1 ][0] }}"    
+  delegate_facts: true
+  run_once: true
 
 # If we need to stop the Master Observer to change the password, then we will need to disable Fast Start Failover first
 - name: Disable Fast Start Failover
@@ -575,7 +593,8 @@
       - name: Move Master Observer to 2nd Standby if 1st Standby Not Available
         script: set_master_observer_host.sh "{{ observer_config_dir }}/observer.ora" "{{ hostvars[groups[ standby2 ][0]]['my_hostname'] }}"
         when: 
-           - (get_master_observer_host.stdout | trim ) != ( hostvars[groups[ standby2 ][0]]['my_hostname'] | trim )
+           - high_availability_count | int == 2
+           - (get_master_observer_host.stdout | trim ) != ( hostvars[groups[ standby2 ][0]]['my_hostname']  | trim )
            - not hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower in databases_in_configuration
            - hostvars[groups[ standby2 ][0]]['database_standby_sid'] | lower in databases_in_configuration
        
