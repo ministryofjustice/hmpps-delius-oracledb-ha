@@ -6,6 +6,7 @@
   set_fact:
     update_ssm_parameter_restore: false
     post_restore: false
+    fsfo_setup: false
        
 - name: (main) Set fact to decide whether to update ssm parameter post rman duplicate
   set_fact:
