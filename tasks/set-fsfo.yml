@@ -468,9 +468,17 @@
   delegate_facts: true
   run_once: true
 
-- name: Show All Hostnames
-  debug:
-     msg: "Current Hostname: {{ my_hostname }}.   Primary Hostname: {{  hostvars[groups[ primary ][0]]['my_hostname'] }}  Standby #1 Hostname:  {{  hostvars[groups[ standby1 ][0]]['my_hostname'] }}  Standby #2 Hostname:  {{  hostvars[groups[ standby2 ][0]]['my_hostname'] | default('not gathered') }} "
+- debug:
+     msg: "Current Hostname: {{ my_hostname }}"
+     
+- debug:
+     msg: "Primary Hostname: {{  hostvars[groups[ primary ][0]]['my_hostname'] }}"
+     
+- debug:
+     msg: "Standby #1 Hostname:  {{  hostvars[groups[ standby1 ][0]]['my_hostname'] }}"
+     
+- debug:
+     msg: "Standby #2 Hostname:  {{  hostvars[groups[ standby2 ][0]]['my_hostname'] | default('not gathered') }}"
 
 # If we need to stop the Master Observer to change the password, then we will need to disable Fast Start Failover first
 - name: Disable Fast Start Failover
