@@ -6,6 +6,7 @@
   set_fact:
     update_ssm_parameter_restore: false
     post_restore: false
+    fsfo_setup: false
        
 - name: (main) Set fact to decide whether to update ssm parameter post rman duplicate
   set_fact:
@@ -16,6 +17,11 @@
   set_fact:
     post_restore: true
   when:  method is defined and method == "post"
+
+- name: (main) Set fact to only carry out FSFO Setup
+  set_fact:
+    fsfo_setup: true
+  when:  method is defined and method == "fsfo setup"
 
 - name: (main) Set up oracle specific variables
   block:
@@ -33,11 +39,28 @@
         oracle_grid_oracle_home: "{{ grid_home.stdout }}"
   tags: var
 
+- name: (main/set-primary-config) Gather facts with dns filter
+  setup:
+    filter: ansible_dns
+  tags: var
+
 - name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
   set_fact:
     standby_host_tns: "{{ standby_host | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
     primary_host_tns: "{{ primary_host | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
+  when: not fsfo_setup
   tags: var
+
+- block:
+
+    - name: (main) Configure FSFO
+      include: set-fsfo.yml
+      when: (fsfo_mode | default('disabled')) != 'disabled'
+      become: true
+      become_user: "{{ rdbms_service_user.name }}"
+      tags: fsfo
+
+  when: fsfo_setup
 
 - block:
     - name: (main) Configure Oracle data guard broker
@@ -49,7 +72,7 @@
 
     - name: (main) Configure FSFO
       include: set-fsfo.yml
-      when: fsfo_mode != 'disabled'
+      when: (fsfo_mode | default('disabled')) != 'disabled'
       become: true
       become_user: "{{ rdbms_service_user.name }}"
       tags: fsfo
@@ -57,92 +80,93 @@
     - meta: end_play
   when: post_restore
 
+# Provided we are not running FSFO Set-Up, run all of the following block
+# to build the HA
 - block:
-    - name: (main) Only carry out ha tasks if high availability configured
-      debug:
-        msg: "No high availability database to be configured...exiting"
-    - meta: end_play
-  run_once: True
-  when: high_availability_count is defined and high_availability_count==0
-  tags: var
 
-- name: (main/set-primary-config) Gather facts with dns filter
-  setup:
-    filter: ansible_dns
-  tags: var
+      - block:
+          - name: (main) Only carry out ha tasks if high availability configured
+            debug:
+              msg: "No high availability database to be configured...exiting"
+          - meta: end_play
+        run_once: True
+        when: high_availability_count is defined and high_availability_count==0
+        tags: var
 
-- name: (main) Load in our vars
-  include_vars:
-    file: main.yml
-  no_log: true
-  tags: always
+      - name: (main) Load in our vars
+        include_vars:
+          file: main.yml
+        no_log: true
+        tags: always
 
-- name: (main) Check if inside AWS.
-  uri:
-    url: http://169.254.169.254/latest/meta-data
-    timeout: 20
-  register: aws_uri_check
-  failed_when: false
+      - name: (main) Check if inside AWS.
+        uri:
+          url: http://169.254.169.254/latest/meta-data
+          timeout: 20
+        register: aws_uri_check
+        failed_when: false
 
-- set_fact:
-    is_aws_environment: "{{ aws_uri_check.status == 200 }}"
+      - set_fact:
+          is_aws_environment: "{{ aws_uri_check.status == 200 }}"
 
-- name: (main) Get our ec2 instance facts
-  ec2_metadata_facts:
-  when: is_aws_environment|bool
-  no_log: true
+      - name: (main) Get our ec2 instance facts
+        ec2_metadata_facts:
+        when: is_aws_environment|bool
+        no_log: true
 
-- name: (main) Get the Dependencies Bucket ARN from Primary
-  shell: . /etc/environment; echo $DEPENDENCIES_BUCKET_ARN
-  register: dependencies_bucket_arn
-  changed_when: false
-  delegate_to: "{{ groups[primary][0] }}"
-  when: inventory_hostname in groups[ standby ]
-  tags: stand
+      - name: (main) Get the Dependencies Bucket ARN from Primary
+        shell: . /etc/environment; echo $DEPENDENCIES_BUCKET_ARN
+        register: dependencies_bucket_arn
+        changed_when: false
+        delegate_to: "{{ groups[primary][0] }}"
+        when: inventory_hostname in groups[ standby ]
+        tags: stand
 
-- name: (main) Update the Dependency Bucket ARN in Standby Environment File
-  lineinfile:
-    path: /etc/environment
-    regexp: 'export DEPENDENCIES_BUCKET_ARN=".*"'
-    line: export DEPENDENCIES_BUCKET_ARN="{{ dependencies_bucket_arn.stdout }}"
-  when: inventory_hostname in groups[ standby ]
-  tags: stand  
+      - name: (main) Update the Dependency Bucket ARN in Standby Environment File
+        lineinfile:
+          path: /etc/environment
+          regexp: 'export DEPENDENCIES_BUCKET_ARN=".*"'
+          line: export DEPENDENCIES_BUCKET_ARN="{{ dependencies_bucket_arn.stdout }}"
+        when: inventory_hostname in groups[ standby ]
+        tags: stand  
 
-- name: (main) Set standby configuration parameters
-  include: set-standby-config.yml
-  when: inventory_hostname in groups[ standby ]
-  tags: stand
+      - name: (main) Set standby configuration parameters
+        include: set-standby-config.yml
+        when: inventory_hostname in groups[ standby ]
+        tags: stand
 
-- name: (main) Setup primary
-  block:
-    - name: (main) Configuration parameters
-      include: set-primary-config.yml
-    - name: (main) Database parameters
-      include: set-primary-params.yml
-  when: inventory_hostname in groups[ primary ]
-  tags: prim
+      - name: (main) Setup primary
+        block:
+          - name: (main) Configuration parameters
+            include: set-primary-config.yml
+          - name: (main) Database parameters
+            include: set-primary-params.yml
+        when: inventory_hostname in groups[ primary ]
+        tags: prim
 
-- name: (main) Restore primary to standby
-  include: restore-primary-to-standby.yml
-  tags: restore
+      - name: (main) Restore primary to standby
+        include: restore-primary-to-standby.yml
+        tags: restore
 
-- block:
-    - name: (main) Configure Oracle data guard broker
-      include: set-primary-dgbroker.yml
-      when: inventory_hostname in groups[ primary ]
-      tags: dg
+        when: not fsfo_setup
 
-    - name: (main) Setup taf service name
-      include: set-taf-service.yml
-      tags: taf
+      - block:
+          - name: (main) Configure Oracle data guard broker
+            include: set-primary-dgbroker.yml
+            when: inventory_hostname in groups[ primary ]
+            tags: dg
 
-    - name: (main) Configure FSFO
-      include: set-fsfo.yml
-      when: fsfo_mode != 'disabled'
-      become: true
-      become_user: "{{ rdbms_service_user.name }}"
-      tags: fsfo
+          - name: (main) Setup taf service name
+            include: set-taf-service.yml
+            tags: taf
 
-  when: not post_restore and not update_ssm_parameter_restore
+          - name: (main) Configure FSFO
+            include: set-fsfo.yml
+            when: ( fsfo_mode | default('disabled')) != 'disabled'
+            become: true
+            become_user: "{{ rdbms_service_user.name }}"
+            tags: fsfo
 
+        when: not post_restore and not update_ssm_parameter_restore 
 
+  when: not fsfo_setup

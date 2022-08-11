@@ -1,6 +1,5 @@
-
 - name: Steps on Primary Only
-  when: inventory_hostname in groups[ primary ]
+  delegate_to: "{{ groups[ primary ][0] }}"
   run_once: true
   block:
 
@@ -24,23 +23,21 @@
 
       - name: Set Configuration-Wide Service Name
         set_fact:
-            configuration_wide_service_name: "{{ get_ConfigurationWideServiceName.stdout_lines[-1] | replace(\"'\",'') |  trim }}"
-  
-- name: Fix Undefined Configuration-Wide Service Name
-  when: 
-      - inventory_hostname in groups[ primary ]
-      - ( get_ConfigurationWideServiceName.stdout_lines[-1] | replace("'",'') |  trim ) == ''
-  run_once: true
-  block:
+            configuration_wide_service_name: "{{ get_ConfigurationWideServiceName.stdout_lines[-1] | default('') | replace(\"'\",'') |  trim }}"
+        
+      # Do not use configuration_wide_service_name in the when conditition as it will mutate before the end of the block
+      - name: Fix Undefined Configuration-Wide Service Name
+        when: ( get_ConfigurationWideServiceName.stdout_lines[-1] | default('') | replace("'",'') |  trim ) == ''
+        block:
 
-      - name: Set New Configuration-Wide Service Name
-        set_fact:
-             configuration_wide_service_name: "{{ database_primary_unique }}_CFG"
+            - name: Set New Configuration-Wide Service Name
+              set_fact:
+                  configuration_wide_service_name: "{{ database_primary_unique }}_CFG"
 
-      - name: Configure Configuration-Wide Service Name
-        shell: |
-              . ~/.bash_profile
-              dgmgrl  / "edit configuration set property ConfigurationWideServiceName='{{ configuration_wide_service_name }}'"
+            - name: Configure Configuration-Wide Service Name
+              shell: |
+                    . ~/.bash_profile
+                    dgmgrl  / "edit configuration set property ConfigurationWideServiceName='{{ configuration_wide_service_name }}'"
 
 - name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
   set_fact:
@@ -49,6 +46,7 @@
 
 - name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
   set_fact:
+    primary_host_tns: "{{  hostvars[groups[ primary ][0]]['inventory_hostname']  | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
     standby_host1_tns: "{{ hostvars[groups[ standby1 ][0]]['inventory_hostname']  | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
     standby_host2_tns: "{{ hostvars[groups[ standby2 ][0]]['inventory_hostname']  | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
 
@@ -79,13 +77,14 @@
        )
     owner: "{{ rdbms_service_user.name }}"
     group: "{{ rdbms_service_user.group }}"
-    marker: "# {mark} ANSIBLE MANAGED BLOCK ADD {{ configuration_wide_service_name }}"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK ADD CONFIGURATION-WIDE SERVICE NAME"
 
 - name: Get Oracle Base
   shell: |
     . ~/.bash_profile
     echo $ORACLE_BASE
   register: oracle_base_result
+  delegate_to: "{{ groups[ primary ][0] }}"
   run_once: true
   changed_when: false  
 
@@ -136,69 +135,39 @@
           echo exit | sqlplus -S -L /@{{ configuration_wide_service_name }} as sysdba
   register: check_password
   ignore_errors: True
-  when: ( get_configuration_wide_service_name_in_wallet.stdout | int ) > 1
+  when: ( get_configuration_wide_service_name_in_wallet.stdout | int ) > 0
 
 - name: Get sys password from ssm parameter store
   shell: . /etc/environment && aws ssm get-parameters --region ${REGION} --with-decryption --name /${HMPPS_ENVIRONMENT}/${APPLICATION}/${HMPPS_ROLE}-database/db/oradb_sys_password | jq -r '.Parameters[].Value'
   register: get_sys_password
   changed_when: false
-  when: (( get_configuration_wide_service_name_in_wallet.stdout | int ) == 0) or (( check_password.rc | default(1)) > 0)
 
-- name: Update Existing Wallet Credentials with New Password
-  shell: |
-          . ~/.bash_profile
-          mkstore -wrl {{ wallet_dir }} -modifyCredential {{ configuration_wide_service_name }} sys {{ get_sys_password.stdout }}
-  when:
-      - ( get_configuration_wide_service_name_in_wallet.stdout | int ) > 1
-      - ( check_password.rc | default(1)) > 0
+- name: Initialize List of Data Guard Credentials
+  set_fact:
+      data_guard_credentials: "{{ [hostvars[groups[ primary ][0]]['database_primary_unique'] + '_CFG', hostvars[groups[ primary ][0]]['database_primary_unique']] }}"
 
-- name: Add Configuration-Wide Service Credentials to Wallet
-  shell: |
-          . ~/.bash_profile
-          mkstore -wrl {{ wallet_dir }} -createCredential {{ configuration_wide_service_name }} sys {{ get_sys_password.stdout }}
-  when: ( get_configuration_wide_service_name_in_wallet.stdout | int ) == 0
+- name: Add 1st Standby to Credentials List Where it Exists
+  set_fact:
+      data_guard_credentials: "{{ data_guard_credentials + [ hostvars[groups[ standby1 ][0]]['database_standby_unique'] ] }}"
+  when: high_availability_count | int >= 1
 
-- name: Check if the Primary Database Unique Name is Already in the Wallet
-  shell: |
-          . ~/.bash_profile
-          mkstore -wrl {{ wallet_dir }} -listCredential | grep -c ": {{ hostvars[groups[ primary ][0]]['database_primary_unique'] }} sys$" | cat
-  register: database_in_wallet
-  changed_when: false
-
-- name: Add Primary Database Credentials to Wallet
-  shell: |
-          . ~/.bash_profile
-          mkstore -wrl {{ wallet_dir }} -createCredential {{ hostvars[groups[ primary ][0]]['database_primary_unique'] }} sys {{ get_sys_password.stdout }}
-  when: ( database_in_wallet.stdout | int ) == 0
-
-- name: Check if the 1st Standby Database Unique Name is Already in the Wallet
-  shell: |
-          . ~/.bash_profile
-          mkstore -wrl {{ wallet_dir }} -listCredential | grep -c ": {{ hostvars[groups[ standby1 ][0]]['database_standby_unique'] }} sys$" | cat
-  register: database_in_wallet
-  changed_when: false
-
-- name: Add 1st Standby Database Credentials to Wallet
-  shell: |
-          . ~/.bash_profile
-          mkstore -wrl {{ wallet_dir }} -createCredential {{ hostvars[groups[ standby1 ][0]]['database_standby_unique'] }} sys {{ get_sys_password.stdout }}
-  when: ( database_in_wallet.stdout | int ) == 0
-
-- name: Check if the Optional 2nd Standby Database Unique Name is Already in the Wallet
-  shell: |
-          . ~/.bash_profile
-          mkstore -wrl {{ wallet_dir }} -listCredential | grep -c ": {{ hostvars[groups[ standby2 ][0]]['database_standby_unique'] }} sys$" | cat
-  register: database_in_wallet
+- name: Add Optional 2nd Standby to Credentials List Where it Exists
+  set_fact:
+      data_guard_credentials: "{{ data_guard_credentials + [ hostvars[groups[ standby2 ][0]]['database_standby_unique']  ] }}"
   when: high_availability_count | int == 2
-  changed_when: false
 
-- name: Add Optional 2nd Standby Database Credentials to Wallet
-  shell: |
-          . ~/.bash_profile
-          mkstore -wrl {{ wallet_dir }} -createCredential {{ hostvars[groups[ standby2 ][0]]['database_standby_unique'] }} sys {{ get_sys_password.stdout }}
-  when: 
-     - ( database_in_wallet.stdout | int ) == 0
-     - high_availability_count | int == 2
+- debug: var=data_guard_credentials
+
+- name: Initialize Password Update Count
+  set_fact:
+      password_update_count: 0
+
+- name: Update Password in Data Guard Wallet
+  include: update_data_guard_wallet_credentials.yml
+  vars:
+    credential_name: "{{ item }}"
+    sys_password: "{{ get_sys_password.stdout }}"
+  loop: "{{ data_guard_credentials }}"    
 
 - name: Define Location for Observer Configuration
   set_fact:
@@ -215,7 +184,8 @@
     dest: "{{ observer_config_dir }}/observer.ora"
 
 - name: Steps on Primary Only
-  when: inventory_hostname in groups[ primary ]
+  delegate_to: "{{ groups[ primary ][0] }}"
+  run_once: true
   block:
 
       - name: Get Existing FSFO Health Conditions
@@ -287,6 +257,7 @@
           . ~/.bash_profile
            dgmgrl -silent / "show database verbose {{ database_primary_sid | default(database_standby_sid) }}" | awk -F= '/FastStartFailoverTarget/{print $2}'
   register: get_FastStartFailoverTarget
+  changed_when: false
 
 - name: Set FSFO Targets
   set_fact:
@@ -297,7 +268,7 @@
          . ~/.bash_profile
          dgmgrl  / "show configuration;" | awk '/.* - .*database/{if(flag==1){print $0}}/Members:/{flag=1}/^Fast-Start Failover/{flag=0}'
   register: get_databases_in_configuration
-  when: inventory_hostname in groups[ primary ]
+  delegate_to: "{{ groups[ primary ][0] }}"
   changed_when: false
   run_once: yes
 
@@ -306,7 +277,7 @@
   set_fact:
       databases_in_configuration: "{{ databases_in_configuration | default([]) + [ item.split('-')[0] | trim ] }}"
   loop: "{{ get_databases_in_configuration.stdout_lines }}"
-  when: inventory_hostname in groups[ primary ]
+  delegate_to: "{{ groups[ primary ][0] }}"
   run_once: yes
 
 - name: Determine Expected FSFO Targets Depending on Configuration
@@ -335,26 +306,27 @@
           - ( databases_in_configuration | length ) == 3
           - databases_in_configuration[2] < databases_in_configuration[1]
 
-      - name: Determine Required FSFO Targets for New First Standby
+      - name: Determine Required FSFO Target (Primary) for New First Standby
         set_fact:
           fsfo_targets: "{{ databases_in_configuration[0] }}"
         when: 
-          - inventory_hostname in groups[ standby ]
+          - inventory_hostname in ( groups[ standby1 ] + groups[ standby2 ] )
           - ( databases_in_configuration | length | int ) < 3
 
-      - name: Determine Required FSFO Targets for New Second Standby
+      # If we have added a second standby then the FSFO target should be the primary and the *other* standby
+      - name: Determine Required FSFO Target (Primary,1st Standby) for New Second Standby
         set_fact:
           fsfo_targets: "{{ databases_in_configuration[0] }},{{ databases_in_configuration[1] }}"
         when: 
-          - inventory_hostname in groups[ standby ]
+          - inventory_hostname in ( groups[ standby1 ] + groups[ standby2 ] )
           - ( database_standby_sid | lower ) != ( databases_in_configuration[1] | lower )
           - ( databases_in_configuration | length | int ) == 3
 
-      - name: Determine Required FSFO Targets for New Second Standby
+      - name: Determine Required FSFO Target (Primary,2nd Standby) for New Second Standby
         set_fact:
           fsfo_targets: "{{  databases_in_configuration[0] }},{{ databases_in_configuration[2] }}"
         when: 
-          - inventory_hostname in groups[ standby ]
+          - inventory_hostname in ( groups[ standby1 ] + groups[ standby2 ] )
           - ( database_standby_sid | lower ) != ( databases_in_configuration[2] | lower )
           - ( databases_in_configuration | length | int ) == 3
      
@@ -373,7 +345,7 @@
   block:
 
       - name: Get FSFO Targets
-        script: |
+        shell: |
                 . ~/.bash_profile
                 dgmgrl -silent / "show database verbose {{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] }};" | awk -F= '/FastStartFailoverTarget/{print $2}'
         register: get_FastStartFailoverTarget
@@ -387,7 +359,7 @@
         shell: |
                . ~/.bash_profile
                dgmgrl / "edit database {{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] }} set property FastStartFailoverTarget='{{ hostvars[groups[ primary ][0]]['database_primary_sid'] }},{{ hostvars[groups[ standby2 ][0]]['database_standby_sid'] }}';"
-        when: (fsfo_targets | lower ) != (  "hostvars[groups[ primary ][0]]['database_primary_sid'] }},{{ hostvars[groups[ standby2 ][0]]['database_standby_sid']" | lower )
+        when: (fsfo_targets | lower ) != (  hostvars[groups[ primary ][0]]['database_primary_sid'] + "," + hostvars[groups[ standby2 ][0]]['database_standby_sid'] | lower )
         delegate_to:  "{{ hostvars[groups[ standby1 ][0]]['inventory_hostname'] }}"
 
 
@@ -402,7 +374,7 @@
   block:
 
       - name: Get FSFO Targets
-        script: |
+        shell: |
                 . ~/.bash_profile
                 dgmgrl -silent / "show database verbose {{ hostvars[groups[ standby2 ][0]]['database_standby_sid'] }}" | awk -F= '/FastStartFailoverTarget/{print $2}'
         register: get_FastStartFailoverTarget
@@ -416,14 +388,14 @@
         shell: |
                . ~/.bash_profile
                dgmgrl  -silent / "edit database {{ hostvars[groups[ standby2 ][0]]['database_standby_sid'] }} set property FastStartFailoverTarget='{{ hostvars[groups[ primary ][0]]['database_primary_sid'] }},{{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] }}';"
-        when: (fsfo_targets | lower ) != (  "hostvars[groups[ primary ][0]]['database_primary_sid'] }},{{ hostvars[groups[ standby1 ][0]]['database_standby_sid']" | lower )
+        when: (fsfo_targets | lower ) != ( hostvars[groups[ primary ][0]]['database_primary_sid'] + "," + hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower )
         delegate_to:  "{{ hostvars[groups[ standby2 ][0]]['inventory_hostname'] }}"
 
 
 
 # Now Set up Observers for FSFO
 - name: Check Observers from Primary
-  when: inventory_hostname in groups[ primary ]
+  delegate_to: "{{ groups[ primary ][0] }}"
   run_once: true
   block:
 
@@ -447,8 +419,9 @@
 
       - name: Stop Any Backup Observers Co-Located on Master (Want Only One per AZ)
         shell: |
-              . ~/.bash_profile
+              . ~/.bash_profile        
               dgmgrl / "stop observer {{ item }};"
+              sleep 10
         loop: "{{ observer_dict.keys() }}"
         register: stop_colocate_master
         when: 
@@ -460,18 +433,83 @@
         shell: |
               . ~/.bash_profile
               dgmgrl / "stop observer {{ item }};"
+              sleep 10
         loop: "{{ observer_dict.keys() }}"
         register: stop_colocate_backup
         when: 
             - observer_dict[item].type == 'Backup'
-            - observer_dict[item].hostname in ( observer_dict | dict2items | json_query('[?value.type==`Backup`].value.hostname') )
-            - observer_dict[item].observer_name != ( observer_dict | dict2items | json_query('[?value.type==`Backup`].value.observer_name') | first )
+            - observer_dict[item].observer_name != ( observer_dict | dict2items | json_query('[?value.hostname==`' + observer_dict[item].hostname + '`].value.observer_name') | first )
+
+# We require the hostname as supplied by the hostname command as this is what is used by the Data Guard Broker to identify hosts
+- name: Get Hostname
+  shell: |
+         hostname
+  register: get_hostname
+  changed_when: false
+
+- name: Set Hostname
+  set_fact:
+      my_hostname: "{{ get_hostname.stdout }}"
+
+# Even if we are running a build on Standby #2 we still need to know the hostname of Standby #1 as this is the preferred target
+# for the Master Observer.    Therefore we gather this hostname explictly and delegate the fact.
+- name: Get 1st Standby Hostname
+  shell: | 
+         hostname
+  register: get_hostname_1st_standby
+  delegate_to: "{{ groups[ standby1 ][0] }}"
+  run_once: true
+  changed_when: false
+
+- debug:
+    msg: "Hostname 1st Standby: {{ get_hostname_1st_standby.stdout }}"
+
+- name: Set 1st Standby Hostname
+  set_fact:
+      my_hostname: "{{ get_hostname_1st_standby.stdout }}" 
+  delegate_to: "{{ groups[ standby1 ][0] }}"    
+  delegate_facts: true
+  run_once: true
+
+- debug:
+     msg: "Current Hostname: {{ my_hostname }}"
+     
+- debug:
+     msg: "Primary Hostname: {{  hostvars[groups[ primary ][0]]['my_hostname'] }}"
+     
+- debug:
+     msg: "Standby #1 Hostname:  {{  hostvars[groups[ standby1 ][0]]['my_hostname'] }}"
+     
+- debug:
+     msg: "Standby #2 Hostname:  {{  hostvars[groups[ standby2 ][0]]['my_hostname'] | default('not gathered') }}"
+
+# If we need to stop the Master Observer to change the password, then we will need to disable Fast Start Failover first
+- name: Disable Fast Start Failover
+  shell: |
+      . ~/.bash_profile
+      dgmgrl / "disable fast_start failover;"
+  when: 
+     - my_hostname == ( observer_dict | dict2items | json_query('[?value.type==`Master`].value.hostname') | first | default('none') )
+     - ( password_update_count | int ) > 0
+
+- debug: 
+     msg: "{{ observer_dict | dict2items | json_query('[?value.hostname==`' + my_hostname + '`].value.observer_name') | list }}"
+
+# Stop all the Observers on this host if the password has been changed to then allow it to restart with the new password
+# Note that the stopping of Observers can take a long time to complete
+- name: Stop Observers if Password Changed
+  script: stop_observer.sh "{{ observer_config_dir }}/observer.ora" "{{ item }}"
+  loop: "{{ observer_dict | dict2items | json_query('[?value.hostname==`' + my_hostname + '`].value.observer_name') | list }}"
+  when: 
+    - ( password_update_count | int ) > 0
+    - ( item | length ) > 1
+  vars:
+    ansible_aws_ssm_timeout: 600
 
 # If any Observers have been stopped, refresh the dictionary of observers
 - name: Refresh Observers After Stop
-  when:
-      - stop_colocate_master.changed or stop_colocate_backup.changed
-      - inventory_hostname in groups[ primary ]
+  when: stop_colocate_master.changed or stop_colocate_backup.changed or (( password_update_count | int ) > 0)
+  delegate_to: "{{ groups[ primary ][0] }}"
   run_once: true
   block:
 
@@ -490,25 +528,17 @@
         loop: "{{ get_observer_hosts.stdout_lines | default([])  }}"
         when: not get_observer_hosts.stdout is search ("BECOME-SUCCESS")
 
-# We require the hostname as supplied by the hostname command as this is what is used by the Data Guard Broker to identify hosts
-- name: Get Hostname
-  shell: |
-         hostname
-  register: get_hostname
-
-- name: Set Hostname
-  set_fact:
-      my_hostname: "{{ get_hostname.stdout }}"
+      - debug: var=observer_dict
 
 - name: Start 1st Standby Observer
-  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ hostvars[groups[ primary ][0]]['database_primary_sid'] }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
+  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ configuration_wide_service_name }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
   when: 
       - inventory_hostname in groups[ standby1 ]
-      - standby_number | int == 1
+      - standby_number | int >= 1
       - my_hostname not in ( observer_dict.values() | map(attribute='hostname') | list )
 
 - name: Start 2nd Standby Observer
-  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ hostvars[groups[ primary ][0]]['database_primary_sid'] }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
+  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ configuration_wide_service_name }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
   when: 
       - inventory_hostname in groups[ standby2 ]
       - standby_number | int == 2
@@ -517,13 +547,14 @@
 # Observer on Primary is not initially useful but may be required following switchover or failover.
 # Set it to initially monitor the 1st Standby
 - name: Start Primary Observer
-  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
+  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ configuration_wide_service_name }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
   when: 
       - inventory_hostname in groups[ primary ]
       - my_hostname not in ( observer_dict.values() | map(attribute='hostname') | list )
-        
+    
 - name: Steps on Primary Only
-  when: inventory_hostname in groups[ primary ]
+  delegate_to: "{{ groups[ primary ][0] }}"
+  run_once: true
   block:
 
       - name: Get Fast-Start Failover Status
@@ -543,13 +574,14 @@
             - ( (get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | lower == 'enabled') )
               or ( (not get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | lower == 'observe') )
 
+      # Accept both 'observe' or 'observer' as a valid mode
       - name: Enable Observe-Only Mode
         shell: |
               . ~/.bash_profile
               dgmgrl -silent / "enable fast_start failover observe only"
         when:
             - not get_fast_start_failover.stdout is search("Observe-Only Mode")
-            - fsfo_mode | lower == 'observe'
+            - fsfo_mode | lower == 'observe' or fsfo_mode | lower == 'observer'
 
       - name: Enable FSFO Mode
         shell: |
@@ -564,16 +596,20 @@
         register: get_master_observer_host
         changed_when: false
 
+      - debug:
+           msg: "Master Observer Host: {{ get_master_observer_host.stdout | trim }}.   Target Master Observer Host: {{ hostvars[groups[ standby1 ][0]]['my_hostname'] }}"
+
       - name: Move Master Observer to 1st Standby
-        script: set_master_observer_host.sh "{{ observer_config_dir }}/observer.ora" {{ standby_host1_tns }}
+        script: set_master_observer_host.sh "{{ observer_config_dir }}/observer.ora" "{{ hostvars[groups[ standby1 ][0]]['my_hostname'] }}"
         when: 
-           - get_master_observer_host.stdout != standby_host1_tns.split('.')[0]
+           - ( get_master_observer_host.stdout | trim ) != ( hostvars[groups[ standby1 ][0]]['my_hostname'] | trim )
            - hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower in databases_in_configuration
 
       - name: Move Master Observer to 2nd Standby if 1st Standby Not Available
-        script: set_master_observer_host.sh "{{ observer_config_dir }}/observer.ora" {{ standby_host2_tns }}
+        script: set_master_observer_host.sh "{{ observer_config_dir }}/observer.ora" "{{ hostvars[groups[ standby2 ][0]]['my_hostname'] }}"
         when: 
-           - get_master_observer_host.stdout != standby_host2_tns.split('.')[0]
+           - standby_number | int == 2
+           - (get_master_observer_host.stdout | trim ) != ( hostvars[groups[ standby2 ][0]]['my_hostname']  | trim )
            - not hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower in databases_in_configuration
            - hostvars[groups[ standby2 ][0]]['database_standby_sid'] | lower in databases_in_configuration
        
@@ -591,4 +627,4 @@
         shell: |
                . ~/.bash_profile
                dgmgrl -silent / "set fast_start failover target to {{ fsfo_targets.split(',')[0] | lower }};"
-        when: ( fsfo_targets.split(',')[0] | lower | trim ) != ( get_active_target | lower | trim )
+        when: ( fsfo_targets.split(',')[0] | lower | trim ) != ( get_active_target.stdout | lower | trim )
