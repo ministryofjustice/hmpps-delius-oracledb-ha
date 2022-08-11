@@ -1,0 +1,10 @@
+ACTION_SCRIPT={{ observer_script }}
+AUTO_START=always
+DESCRIPTION=Start Data Guard Observer 
+PLACEMENT=restricted
+HOSTING_MEMBERS={{ ec2_hostname }}
+CARDINALITY=1
+ENABLED=1
+INSTANCE_FAILOVER=0
+START_DEPENDENCIES=hard(intermediate:ora.{{ db_service }}.db)
+STOP_DEPENDENCIES=hard(shutdown:ora.{{ db_service }}.db)

@@ -183,6 +183,66 @@
     src: observer.j2
     dest: "{{ observer_config_dir }}/observer.ora"
 
+# We require the hostname (EC2 Hostname) as supplied by the hostname command as this is what is used by the Data Guard Broker to identify hosts
+- name: Get Hostname
+  shell: |
+         hostname
+  register: get_hostname
+  changed_when: false
+
+- name: Set Hostname
+  set_fact:
+      my_hostname: "{{ get_hostname.stdout }}"
+
+- name: Install CRS Resource Action Script to Control the Observer
+  copy:
+    src: observer.sh
+    dest: "{{ observer_config_dir }}/observer.sh"
+    mode: u+rw
+  
+- name: Install CRS Resource Attributes for Observer
+  template:
+    src: observer.config.j2
+    dest: "{{ observer_config_dir }}/observer.config"
+  vars:
+    observer_script: "{{ observer_config_dir }}/observer.sh"
+    ec2_hostname: "{{ my_hostname }}"
+    db_service: "{{ database_primary_sid | default(database_standby_sid) | lower }}"
+
+- name: Define Name for CRS Resource for Observer
+  set_fact:
+      observer_resource: "dg.observer"
+
+- name: Check if CRS Resource Already Exists
+  shell: |
+        . ~/.bash_profile
+        export ORACLE_SID=+ASM
+        export ORAENV_ASK=NO
+        . oraenv
+        crsctl status resource {{ observer_resource }} -p
+  changed_when: false
+  register: get_crs_resource
+
+- name: Add CRS Resource for Observer
+  shell: |
+        . ~/.bash_profile
+        export ORACLE_SID=+ASM
+        export ORAENV_ASK=NO
+        . oraenv
+        crsctl add resource {{ observer_resource }} -type cluster_resource -file {{ observer_config_dir }}/observer.config
+  when: get_crs_resource.stdout is search('.*CRS-2613.*')
+
+# Whilst we are working on configuring / resetting the Observers we want to temporarily remove them from the control of CRS
+# so that it does not attempt to restart the resources at a time not of our choosing
+- name: Disable CRS Resource for Observer
+  shell: |
+        . ~/.bash_profile
+        export ORACLE_SID=+ASM
+        export ORAENV_ASK=NO
+        . oraenv
+        crsctl modify resource {{ observer_resource }} -attr "ENABLED=0"
+  when: get_crs_resource.stdout is search('.*CRS-2613.*') or not "ENABLED=0" in get_crs_resource.stdout_lines
+
 - name: Steps on Primary Only
   delegate_to: "{{ groups[ primary ][0] }}"
   run_once: true
@@ -440,17 +500,6 @@
             - observer_dict[item].type == 'Backup'
             - observer_dict[item].observer_name != ( observer_dict | dict2items | json_query('[?value.hostname==`' + observer_dict[item].hostname + '`].value.observer_name') | first )
 
-# We require the hostname as supplied by the hostname command as this is what is used by the Data Guard Broker to identify hosts
-- name: Get Hostname
-  shell: |
-         hostname
-  register: get_hostname
-  changed_when: false
-
-- name: Set Hostname
-  set_fact:
-      my_hostname: "{{ get_hostname.stdout }}"
-
 # Even if we are running a build on Standby #2 we still need to know the hostname of Standby #1 as this is the preferred target
 # for the Master Observer.    Therefore we gather this hostname explictly and delegate the fact.
 - name: Get 1st Standby Hostname
@@ -470,18 +519,6 @@
   delegate_to: "{{ groups[ standby1 ][0] }}"    
   delegate_facts: true
   run_once: true
-
-- debug:
-     msg: "Current Hostname: {{ my_hostname }}"
-     
-- debug:
-     msg: "Primary Hostname: {{  hostvars[groups[ primary ][0]]['my_hostname'] }}"
-     
-- debug:
-     msg: "Standby #1 Hostname:  {{  hostvars[groups[ standby1 ][0]]['my_hostname'] }}"
-     
-- debug:
-     msg: "Standby #2 Hostname:  {{  hostvars[groups[ standby2 ][0]]['my_hostname'] | default('not gathered') }}"
 
 # If we need to stop the Master Observer to change the password, then we will need to disable Fast Start Failover first
 - name: Disable Fast Start Failover
@@ -628,3 +665,26 @@
                . ~/.bash_profile
                dgmgrl -silent / "set fast_start failover target to {{ fsfo_targets.split(',')[0] | lower }};"
         when: ( fsfo_targets.split(',')[0] | lower | trim ) != ( get_active_target.stdout | lower | trim )
+
+
+# Now we have completed the set-up of the Observers (or Password Change) we can allow CRS to start managing their availability again.
+# (This is required to ensure that Observers are restarted if the server is rebooted)
+- name: Check if CRS Resource is Still Disabled
+  shell: |
+        . ~/.bash_profile
+        export ORACLE_SID=+ASM
+        export ORAENV_ASK=NO
+        . oraenv
+        crsctl status resource {{ observer_resource }} -p
+  changed_when: false
+  register: get_crs_resource
+
+- name: Restart and Check CRS Resource for Observer
+  shell: |
+        . ~/.bash_profile
+        export ORACLE_SID=+ASM
+        export ORAENV_ASK=NO
+        . oraenv
+        crsctl modify resource {{ observer_resource }} -attr "ENABLED=1"
+        crsctl check resource {{ observer_resource }}
+  when: not "ENABLED=1" in get_crs_resource.stdout_lines
