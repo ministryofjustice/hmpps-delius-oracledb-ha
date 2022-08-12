@@ -14,6 +14,11 @@
 #
 # This script takes no parameters as it determines the name of
 # the Observer dynamically using the Data Guard broker.
+#
+# NOTE: For the purposes of monitoring resources, the Observer is considered
+# to have failed if it is unable to ping either the Primary or Target databases
+# even though the Observer process itself is still running.
+#
 
 . ~/.bash_profile
 
