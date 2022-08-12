@@ -198,7 +198,7 @@
   copy:
     src: observer.sh
     dest: "{{ observer_config_dir }}/observer.sh"
-    mode: u+rw
+    mode: u+rwx
   
 - name: Install CRS Resource Attributes for Observer
   template:
