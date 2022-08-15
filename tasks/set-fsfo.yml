@@ -332,10 +332,14 @@
   changed_when: false
   run_once: yes
 
-# List Index 0=Primary 1=1st Standby 2=2nd Standby
-- name: Create List of Databases in Configuration
+- name: Initialize List of Databases in Configuration
   set_fact:
-      databases_in_configuration: "{{ databases_in_configuration | default([]) + [ item.split('-')[0] | trim ] }}"
+      databases_in_configuration: []  
+
+# List Index 0=Primary 1=1st Standby 2=2nd Standby
+- name: Populate List of Databases in Configuration
+  set_fact:
+      databases_in_configuration: "{{ databases_in_configuration + [ item.split('-')[0] | trim ] }}"
   loop: "{{ get_databases_in_configuration.stdout_lines }}"
   delegate_to: "{{ groups[ primary ][0] }}"
   run_once: yes
@@ -387,8 +391,9 @@
           fsfo_targets: "{{  databases_in_configuration[0] }},{{ databases_in_configuration[2] }}"
         when: 
           - inventory_hostname in ( groups[ standby1 ] + groups[ standby2 ] )
-          - ( database_standby_sid | lower ) != ( databases_in_configuration[2] | lower )
           - ( databases_in_configuration | length | int ) == 3
+          - ( database_standby_sid | lower ) != ( databases_in_configuration[2] | default('no_such_database') | lower )
+
      
 - name: Configure FSFO Targets (New Standby)
   shell: |
