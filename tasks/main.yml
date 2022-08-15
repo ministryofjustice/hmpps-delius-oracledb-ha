@@ -53,6 +53,13 @@
 
 - block:
 
+    - name: (main) Remove FSFO
+      include: unset-fsfo.yml
+      when: ( fsfo_mode | default('disabled')) == 'disabled'
+      become: true
+      become_user: "{{ rdbms_service_user.name }}"
+      tags: fsfo
+
     - name: (main) Configure FSFO
       include: set-fsfo.yml
       when: (fsfo_mode | default('disabled')) != 'disabled'
@@ -69,6 +76,13 @@
 
     - name: (main) Setup taf service name
       include: set-taf-service.yml
+
+    - name: (main) Remove FSFO
+      include: unset-fsfo.yml
+      when: ( fsfo_mode | default('disabled')) == 'disabled'
+      become: true
+      become_user: "{{ rdbms_service_user.name }}"
+      tags: fsfo
 
     - name: (main) Configure FSFO
       include: set-fsfo.yml
@@ -159,6 +173,13 @@
           - name: (main) Setup taf service name
             include: set-taf-service.yml
             tags: taf
+
+          - name: (main) Remove FSFO
+            include: unset-fsfo.yml
+            when: ( fsfo_mode | default('disabled')) == 'disabled'
+            become: true
+            become_user: "{{ rdbms_service_user.name }}"
+            tags: fsfo
 
           - name: (main) Configure FSFO
             include: set-fsfo.yml
