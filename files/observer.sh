@@ -128,7 +128,8 @@ set_master_observer
 
 function count_data_guard_errors()
 {
-echo -e "show configuration;" | dgmgrl -silent / | grep -c ORA-
+# Ignore ORA-16819 (Observer not started) since we are about to start it
+echo -e "show configuration;" | dgmgrl -silent / | grep -v ORA-16819 | grep -c ORA-
 }
 
 
