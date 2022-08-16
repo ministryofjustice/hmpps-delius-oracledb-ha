@@ -53,16 +53,11 @@
 
 - block:
 
-    - name: (main) Remove FSFO
-      include: unset-fsfo.yml
-      when: ( fsfo_mode | default('disabled')) == 'disabled'
-      become: true
-      become_user: "{{ rdbms_service_user.name }}"
-      tags: fsfo
-
+    # When considering if FSFO Setup should be run we only consider the setting on the primary database server.
+    # However the same setting must apply by design to each of the standby databases (whether explicitly defined or not)
     - name: (main) Configure FSFO
       include: set-fsfo.yml
-      when: (fsfo_mode | default('disabled')) != 'disabled'
+      when: ( hostvars[groups[ primary ][0]]['fsfo_mode']    | default('disabled')) != 'disabled'
       become: true
       become_user: "{{ rdbms_service_user.name }}"
       tags: fsfo
@@ -86,7 +81,7 @@
 
     - name: (main) Configure FSFO
       include: set-fsfo.yml
-      when: (fsfo_mode | default('disabled')) != 'disabled'
+      when: ( hostvars[groups[ primary ][0]]['fsfo_mode']   | default('disabled')) != 'disabled'
       become: true
       become_user: "{{ rdbms_service_user.name }}"
       tags: fsfo
@@ -183,7 +178,7 @@
 
           - name: (main) Configure FSFO
             include: set-fsfo.yml
-            when: ( fsfo_mode | default('disabled')) != 'disabled'
+            when: ( hostvars[groups[ primary ][0]]['fsfo_mode']    | default('disabled')) != 'disabled'
             become: true
             become_user: "{{ rdbms_service_user.name }}"
             tags: fsfo
