@@ -1,0 +1,24 @@
+# Ensure Auto-Start is not enabled for the Observer if not configured
+
+- name: Define Name for CRS Resource for Observer
+  set_fact:
+      observer_resource: "dg.observer"
+
+- name: Check if CRS Resource Already Exists
+  shell: |
+        . ~/.bash_profile
+        export ORACLE_SID=+ASM
+        export ORAENV_ASK=NO
+        . oraenv
+        crsctl status resource {{ observer_resource }}
+  changed_when: false
+  register: get_crs_resource
+
+- name: Delete CRS Resource for Observer
+  shell: |
+        . ~/.bash_profile
+        export ORACLE_SID=+ASM
+        export ORAENV_ASK=NO
+        . oraenv
+        crsctl delete resource {{ observer_resource }}
+  when: not get_crs_resource.stdout is search('.*CRS-2613.*')
