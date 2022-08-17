@@ -14,15 +14,22 @@
 #
 # This script takes no parameters as it determines the name of
 # the Observer dynamically using the Data Guard broker.
-#
-# NOTE: For the purposes of monitoring resources, the Observer is considered
-# to have failed if it is unable to ping either the Primary or Target databases
-# even though the Observer process itself is still running.
-#
 
 . ~/.bash_profile
 
 export CONFIG="set ObserverConfigFile=${ORACLE_BASE}/dg_observer/observer.ora;"
+
+#DEBUG=TRUE
+
+
+if [[ "$DEBUG" == "TRUE" ]];
+then
+   exec 
+   set -x
+   date >> ${ORACLE_BASE}/dg_observer/observer_sh.log
+   exec >> ${ORACLE_BASE}/dg_observer/observer_sh.log
+   exec 2>&1
+fi
 
 function usage()
 {
@@ -39,6 +46,70 @@ echo
 function get_active_target_db()
 {
 echo -e "${CONFIG}\nshow observers;" | dgmgrl -silent / | awk '/Active Target:/{print $NF}'
+}
+
+function get_preferred_active_target_database()
+{
+echo "show fast_start failover" | dgmgrl -silent / | grep "Potential Targets:" | awk '{print $NF}' | sed 's/"//g' | cut -d, -f1 
+}
+
+function is_active_target_database_ready()
+{
+ACTIVE_TARGET_DB=$1
+# Return 1 if the required Target database is Ready to be the Active Target
+echo "show database ${ACTIVE_TARGET_DB}" | dgmgrl -silent / | grep -A10 "PHYSICAL STANDBY" | grep -c "SUCCESS"
+}
+
+function poll_for_target_readiness()
+{
+# Wait for Target Database to become Ready to be Active Target
+COUNT=1
+while (( COUNT<= 100 ));
+do
+  echo -ne "."
+  CHECK=$(is_active_target_database_ready)
+  if [[ ${CHECK} -eq 1 ]];
+  then 
+     break
+  fi
+  COUNT=$(( COUNT+1 ))
+done
+echo "NOT READY"
+}
+
+
+function is_preferred_active_target_host()
+{
+PREFERRED_ACTIVE_TARGET_DATABASE=$(get_preferred_active_target_database)
+# Returns 1 if the preferred active target database is running on this host
+# (Target Databases are listed in order of preference in the Potential Targets - FastStartFailoverTargets parameter)
+echo "${PREFERRED_ACTIVE_TARGET_DATABASE}" | grep -ic "^${ORACLE_SID}$"
+}
+
+function set_preferred_active_target_database()
+{
+ACTIVE_TARGET_DATABASE=$(get_active_target_db)
+PREFERRED_ACTIVE_TARGET_DATABASE=$(get_preferred_active_target_database)
+if [[ "${ACTIVE_TARGET_DATABASE}" != "${PREFERRED_ACTIVE_TARGET_DATABASE}" ]];
+then
+   echo "Preferred Active Target Database is ${PREFERRED_ACTIVE_TARGET_DATABASE} but current Active Target Database is ${ACTIVE_TARGET_DATABASE}"
+   # The current Active Target Database is not the Preferred Active Target Database
+   IS_PREFERRED_ACTIVE_TARGET_HOST=$(is_preferred_active_target_host)
+   if [[ ${IS_PREFERRED_ACTIVE_TARGET_HOST} -eq 1 ]];
+   then
+      echo "Preferred Active Target Database is on this host."
+      READY=$(poll_for_target_readiness)
+      if [[ "${READY}" != "NOT READY" ]];
+      then
+         echo "Swapping preferred Active Target"
+         # This is the host where the active target database should be running
+         # (We do not attempt changing target from other hosts as we want to ensure the target host is up)
+         echo "set fast_start failover target to ${PREFERRED_ACTIVE_TARGET_DATABASE};" | dgmgrl -silent /
+      else
+         echo "Preferred Target is not ready - keeping current target"
+      fi
+   fi
+fi
 }
 
 
@@ -101,14 +172,9 @@ function status_observer()
 echo -e "${CONFIG}\nshow observers;" | dgmgrl -silent 
 }
 
-function start_observer()
+function poll_for_observer()
 {
-THIS_CWCN=$(get_cwcn)
-# Check Data Guard does not have any errors before attempting to start
-# the Observer
-check_data_guard
-echo -e "${CONFIG}\nconnect /\nstart observer in background file is ${ORACLE_BASE}/dg_observer/fsfo.dat logfile is ${ORACLE_BASE}/dg_observer/observer.log connect identifier is ${THIS_CWCN};" | dgmgrl -silent
-# Allow time for statup attempt
+# When Observer is started or moved allow a few seconds for status update
 COUNT=1
 while (( COUNT<= 100 ));
 do
@@ -120,16 +186,34 @@ do
   fi
   COUNT=$(( COUNT+1 ))
 done
+}
+
+function start_observer()
+{
+THIS_CWCN=$(get_cwcn)
+# Check Data Guard does not have any errors before attempting to start
+# the Observer
+check_data_guard
+echo -e "${CONFIG}\nconnect /\nstart observer in background file is ${ORACLE_BASE}/dg_observer/fsfo.dat logfile is ${ORACLE_BASE}/dg_observer/observer.log connect identifier is ${THIS_CWCN};" | dgmgrl -silent
+poll_for_observer
 echo
+# Check the Active Target database is set to the preferred database
+set_preferred_active_target_database
+poll_for_observer
 # Check if this is the intended site for the master observer 
 # and change the type of the observer if it is not currently so
 set_master_observer
+poll_for_observer
+echo
+RC=$(check_observer)
+exit $RC
 }
 
 function count_data_guard_errors()
 {
 # Ignore ORA-16819 (Observer not started) since we are about to start it
-echo -e "show configuration;" | dgmgrl -silent / | grep -v ORA-16819 | grep -c ORA-
+# Ignore ORA-16820 (Database not being observed) for same reason
+echo -e "show configuration;" | dgmgrl -silent / | grep -v ORA-16819 | grep -v ORA-16820 | grep -c ORA-
 }
 
 
@@ -137,7 +221,7 @@ function check_data_guard()
 {
 COUNT=1
 # Loop a few times to allow time for any errors to clear
-while (( COUNT <= 60 ));
+while (( COUNT <= 120 ));
 do
   echo -ne "."
   sleep 1
