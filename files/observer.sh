@@ -126,7 +126,7 @@ then
    then
      HOSTNAME=$(hostname)
      echo "Becoming Master Observer"
-     echo -e "${CONFIG}\nset masterobserverhosts to ${HOSTNAME};" | dgmgrl -silent /
+     set_master_observer_host ${HOSTNAME}
    fi
 fi
 }
@@ -138,18 +138,62 @@ echo "Stopping Observer ${OBSERVER}"
 echo -e "${CONFIG}\nconnect /\nstop observer ${OBSERVER};" | dgmgrl -silent
 }
 
-function get_backup_observers()
+function count_backup_observers()
 {
-echo -e "${CONFIG}\nshow observers;"  | dgmgrl -silent / | grep -E "Observer \".+\" - Backup" | awk '{print $2}'
+get_backup_observer_hosts | wc -l
 }
 
-function stop_backup_observers()
+
+function get_master_observer_host()
 {
-for BACKUP_OBSERVER in $(get_backup_observers)
-   {
-   stop_named_observer ${BACKUP_OBSERVER}
-   }
+echo -e "show observer;"  | dgmgrl -silent / | grep -A2 -E "Observer \".+\" - Master"  | awk '/Host Name:/{print $NF}'
 }
+
+
+function get_backup_observer_hosts()
+{
+echo -e "show observer;"  | dgmgrl -silent / | grep -A2 -E "Observer \".+\" - Backup"  | awk '/Host Name:/{print $NF}'
+}
+
+
+function set_master_observer_host()
+{
+TARGET_HOST=$1
+echo "Relocating Master Observer to ${TARGET_HOST}"
+echo "set masterobserverhosts to ${TARGET_HOST};" | dgmgrl -silent /
+return $?
+}
+
+function poll_for_master_observer_host()
+{
+EXPECTED_HOST=$1
+# When Observer is  moved allow a few seconds for placement update
+COUNT=1
+while (( COUNT<= 100 ));
+do
+  echo -ne "."
+  ACTUAL_HOST=$(get_master_observer_host)
+  if [[ "${EXPECTED_HOST}" == "${ACTUAL_HOST}"  ]];
+  then 
+     break
+  fi
+  COUNT=$(( COUNT+1 ))
+  sleep 1
+done
+}
+
+
+function relocate_master_observer()
+{
+for OBSERVER_HOST in $(get_backup_observer_hosts);
+do
+   set_master_observer_host ${OBSERVER_HOST}
+   [[ $? == 0 ]] && break
+   echo "Relocation failed"
+done  
+poll_for_master_observer_host "${OBSERVER_HOST}" 
+} 
+
 
 function get_observer_type()
 {
@@ -206,7 +250,6 @@ set_master_observer
 poll_for_observer
 echo
 RC=$(check_observer)
-exit $RC
 }
 
 function count_data_guard_errors()
@@ -244,10 +287,27 @@ function stop_observer()
 {
 THIS_OBSERVER=$(get_observer)
 THIS_OBSERVER_TYPE=$(get_observer_type ${THIS_OBSERVER})
-# If stopping the Master Observer, the Backup Observers must be stopped first
+# If stopping the Master Observer, if any Backup Observers exist then
+# one of these must be converted to the Master first 
 if [[ "${THIS_OBSERVER_TYPE}" == "Master" ]];
 then
-   stop_backup_observers
+   BACKUP_COUNT=$(count_backup_observers)
+   if [[ ${BACKUP_COUNT} -gt 0 ]];
+   then
+      echo "Converting to Backup Observer"
+      relocate_master_observer
+      THIS_OBSERVER_TYPE=$(get_observer_type ${THIS_OBSERVER})
+      if [[ "${THIS_OBSERVER_TYPE}" == "Master" ]];
+      then
+         if [[ ${BACKUP_COUNT} -gt 0 ]];
+         then
+            echo "Cannot Stop Master Observer as Backup Observers Still Exist"
+            exit 1
+         fi
+      fi
+   else
+      echo "No Backup Observers - Stopping Master"
+   fi
 fi
 if [[ ! -z ${THIS_OBSERVER} ]];
 then
