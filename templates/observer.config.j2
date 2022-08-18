@@ -9,3 +9,5 @@ INSTANCE_FAILOVER=0
 START_DEPENDENCIES=hard(intermediate:ora.{{ db_service }}.db)
 STOP_DEPENDENCIES=hard(shutdown:ora.{{ db_service }}.db)
 START_TIMEOUT=300
+CLEAN_TIMEOUT=400
+OFFLINE_CHECK_INTERVAL=1800
