@@ -1,0 +1,38 @@
+
+      - name: Get Fast-Start Failover Status
+        shell: |
+              . ~/.bash_profile
+              dgmgrl -silent / "show configuration;" | awk -F: '/Fast-Start Failover/{print $2}'
+        register: get_fast_start_failover
+        changed_when: false
+        delegate_to: "{{ delegation_host }}"
+
+      # Prepare for Mode Change if Needed
+      - name: Disble Fast-Start Failover
+        shell: |
+               . ~/.bash_profile
+               dgmgrl -silent / "disable fast_start failover"
+        delegate_to: "{{ delegation_host }}"
+        when:
+            - ( get_fast_start_failover.stdout | trim ) != 'Disabled'
+            - ( (get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | lower == 'enabled') )
+              or ( (not get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | lower == 'observe') )
+
+      # Accept both 'observe' or 'observer' as a valid mode
+      - name: Enable Observe-Only Mode
+        shell: |
+              . ~/.bash_profile
+              dgmgrl -silent / "enable fast_start failover observe only"
+        delegate_to: "{{ delegation_host }}"
+        when:
+            - not get_fast_start_failover.stdout is search("Observe-Only Mode")
+            - fsfo_mode | lower == 'observe' or fsfo_mode | lower == 'observer'
+
+      - name: Enable FSFO Mode
+        shell: |
+              . ~/.bash_profile
+              dgmgrl -silent / "enable fast_start failover"
+        delegate_to: "{{ delegation_host }}"
+        when:
+            - get_fast_start_failover.stdout is search("Observe-Only Mode") or get_fast_start_failover.stdout is search("Disabled")
+            - fsfo_mode | lower == 'enabled'

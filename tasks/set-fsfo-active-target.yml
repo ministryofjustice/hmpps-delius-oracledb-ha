@@ -1,0 +1,15 @@
+      # Depending on the order that Standby databases have been added to the configuation it is possible that the Active Target is not the same as the first one
+      # specified by FastStartFailoverTarget.    If this is the case then it needs to be corrected, so that the preferred failover target is used.
+        
+      - name: Get Current Active Target
+        shell: |
+              . ~/.bash_profile
+               dgmgrl -silent / "show fast_start failover;" | awk '/Active Target:/{print $3}'
+        register: get_active_target
+        changed_when: false
+
+      - name: Set Preferred Active Target
+        shell: |
+               . ~/.bash_profile
+               dgmgrl -silent / "set fast_start failover target to {{ fsfo_targets.split(',')[0] | lower }};"
+        when: ( fsfo_targets.split(',')[0] | lower | trim ) != ( get_active_target.stdout | lower | trim )
