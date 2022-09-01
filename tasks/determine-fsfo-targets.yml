@@ -1,0 +1,69 @@
+- name: Get Databases Currently in Configuration
+  shell: |
+         . ~/.bash_profile
+         dgmgrl  / "show configuration;" | awk '/.* - .*database/{if(flag==1){print $0}}/Members:/{flag=1}/^Fast-Start Failover/{flag=0}'
+  register: get_databases_in_configuration
+  delegate_to: "{{ delegation_host }}"
+  changed_when: false
+
+- name: Initialize List of Databases in Configuration
+  set_fact:
+      databases_in_configuration: []  
+
+# List Index 0=Primary 1=1st Standby 2=2nd Standby
+- name: Populate List of Databases in Configuration
+  set_fact:
+      databases_in_configuration: "{{ databases_in_configuration + [ item.split('-')[0] | trim ] }}"
+  loop: "{{ get_databases_in_configuration.stdout_lines }}"
+  delegate_to: "{{ delegation_host }}"
+
+- name: Determine Expected FSFO Targets Depending on Configuration
+  block:
+
+      - name: Determine Required FSFO Targets for Primary (Single Standby)
+        set_fact:
+          fsfo_targets: "{{ databases_in_configuration[1] }}"
+        when: 
+          - inventory_hostname in groups[ primary ]
+          - ( databases_in_configuration | length | int ) < 3
+
+      - name: Determine Required FSFO Targets for Primary (Double Standby)
+        set_fact:
+          fsfo_targets: "{{ databases_in_configuration[1] }},{{ databases_in_configuration[2] }}"
+        when: 
+          - inventory_hostname in groups[ primary ]
+          - ( databases_in_configuration | length ) == 3
+          - databases_in_configuration[1] < databases_in_configuration[2]
+
+      - name: Determine Required FSFO Targets for Primary (Double Standby)
+        set_fact:
+          fsfo_targets: "{{ databases_in_configuration[2] }},{{ databases_in_configuration[1] }}"
+        when: 
+          - inventory_hostname in groups[ primary ]
+          - ( databases_in_configuration | length ) == 3
+          - databases_in_configuration[2] < databases_in_configuration[1]
+
+      - name: Determine Required FSFO Target (Primary) for New First Standby
+        set_fact:
+          fsfo_targets: "{{ databases_in_configuration[0] }}"
+        when: 
+          - inventory_hostname in ( groups[ standby1 ] + groups[ standby2 ] )
+          - ( databases_in_configuration | length | int ) < 3
+
+      # If we have added a second standby then the FSFO target should be the primary and the *other* standby
+      - name: Determine Required FSFO Target (Primary,1st Standby) for New Second Standby
+        set_fact:
+          fsfo_targets: "{{ databases_in_configuration[0] }},{{ databases_in_configuration[1] }}"
+        when: 
+          - inventory_hostname in ( groups[ standby1 ] + groups[ standby2 ] )
+          - ( database_standby_sid | lower ) != ( databases_in_configuration[1] | lower )
+          - ( databases_in_configuration | length | int ) == 3
+
+      - name: Determine Required FSFO Target (Primary,2nd Standby) for New Second Standby
+        set_fact:
+          fsfo_targets: "{{  databases_in_configuration[0] }},{{ databases_in_configuration[2] }}"
+        when: 
+          - inventory_hostname in ( groups[ standby1 ] + groups[ standby2 ] )
+          - ( databases_in_configuration | length | int ) == 3
+          - ( database_standby_sid | lower ) != ( databases_in_configuration[2] | default('no_such_database') | lower )
+    
