@@ -321,6 +321,10 @@
   changed_when: false
   run_once: yes
 
+- name: Initialize FSFO Targets
+  set_fact:
+      fsfo_targets: ''
+
 - name: Get FSFO Targets
   include_tasks: determine-fsfo-targets.yml  
   run_once: true
