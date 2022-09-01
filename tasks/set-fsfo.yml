@@ -39,17 +39,6 @@
                     . ~/.bash_profile
                     dgmgrl  / "edit configuration set property ConfigurationWideServiceName='{{ configuration_wide_service_name }}'"
 
-- name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
-  set_fact:
-    standby1: "{{ primary  | regex_replace('(.*)_primarydb$','\\1_standbydb1') }}"
-    standby2: "{{ primary  | regex_replace('(.*)_primarydb$','\\1_standbydb2') }}"
-
-- name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
-  set_fact:
-    primary_host_tns: "{{  hostvars[groups[ primary ][0]]['inventory_hostname']  | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
-    standby_host1_tns: "{{ hostvars[groups[ standby1 ][0]]['inventory_hostname']  | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
-    standby_host2_tns: "{{ hostvars[groups[ standby2 ][0]]['inventory_hostname']  | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
-
 - name: Add Optional HA1 TNS Address
   set_fact:
      ha1_address: "(ADDRESS = (PROTOCOL = TCP)(HOST = {{ standby_host1_tns }})(PORT = 1521))"
