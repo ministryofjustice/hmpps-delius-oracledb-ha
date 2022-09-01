@@ -595,82 +595,23 @@
       - my_hostname not in ( observer_dict.values() | map(attribute='hostname') | list )
     
 - name: Steps on Primary Only
-  delegate_to: "{{ groups[ primary ][0] }}"
   run_once: true
   block:
 
-      - name: Get Fast-Start Failover Status
-        shell: |
-              . ~/.bash_profile
-              dgmgrl -silent / "show configuration;" | awk -F: '/Fast-Start Failover/{print $2}'
-        register: get_fast_start_failover
-        changed_when: false
+      - name: Set FSFO Mode
+        include: set-fsfo-mode.yml
+        vars:
+           delegation_host: "{{ groups[ primary ][0] }}"
 
-      # Prepare for Mode Change if Needed
-      - name: Disble Fast-Start Failover
-        shell: |
-               . ~/.bash_profile
-               dgmgrl -silent / "disable fast_start failover"
-        when:
-            - ( get_fast_start_failover.stdout | trim ) != 'Disabled'
-            - ( (get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | lower == 'enabled') )
-              or ( (not get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | lower == 'observe') )
+      - name: Set Placement of FSFO Observer Mode
+        include: place-fsfo-observer.yml
+        vars:
+           delegation_host: "{{ groups[ primary ][0] }}"
 
-      # Accept both 'observe' or 'observer' as a valid mode
-      - name: Enable Observe-Only Mode
-        shell: |
-              . ~/.bash_profile
-              dgmgrl -silent / "enable fast_start failover observe only"
-        when:
-            - not get_fast_start_failover.stdout is search("Observe-Only Mode")
-            - fsfo_mode | lower == 'observe' or fsfo_mode | lower == 'observer'
-
-      - name: Enable FSFO Mode
-        shell: |
-              . ~/.bash_profile
-              dgmgrl -silent / "enable fast_start failover"
-        when:
-            - get_fast_start_failover.stdout is search("Observe-Only Mode") or get_fast_start_failover.stdout is search("Disabled")
-            - fsfo_mode | lower == 'enabled'
-      
-      - name: Get Location of Master Observer
-        script: get_master_observer_host.sh "{{ observer_config_dir }}/observer.ora"
-        register: get_master_observer_host
-        changed_when: false
-
-      - debug:
-           msg: "Master Observer Host: {{ get_master_observer_host.stdout | trim }}.   Target Master Observer Host: {{ hostvars[groups[ standby1 ][0]]['my_hostname'] }}"
-
-      - name: Move Master Observer to 1st Standby
-        script: set_master_observer_host.sh "{{ observer_config_dir }}/observer.ora" "{{ hostvars[groups[ standby1 ][0]]['my_hostname'] }}"
-        when: 
-           - ( get_master_observer_host.stdout | trim ) != ( hostvars[groups[ standby1 ][0]]['my_hostname'] | trim )
-           - hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower in databases_in_configuration
-
-      - name: Move Master Observer to 2nd Standby if 1st Standby Not Available
-        script: set_master_observer_host.sh "{{ observer_config_dir }}/observer.ora" "{{ hostvars[groups[ standby2 ][0]]['my_hostname'] }}"
-        when: 
-           - standby_number | int == 2
-           - (get_master_observer_host.stdout | trim ) != ( hostvars[groups[ standby2 ][0]]['my_hostname']  | trim )
-           - not hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower in databases_in_configuration
-           - hostvars[groups[ standby2 ][0]]['database_standby_sid'] | lower in databases_in_configuration
-       
-      # Depending on the order that Standby databases have been added to the configuation it is possible that the Active Target is not the same as the first one
-      # specified by FastStartFailoverTarget.    If this is the case then it needs to be corrected, so that the preferred failover target is used.
-        
-      - name: Get Current Active Target
-        shell: |
-              . ~/.bash_profile
-               dgmgrl -silent / "show fast_start failover;" | awk '/Active Target:/{print $3}'
-        register: get_active_target
-        changed_when: false
-
-      - name: Set Preferred Active Target
-        shell: |
-               . ~/.bash_profile
-               dgmgrl -silent / "set fast_start failover target to {{ fsfo_targets.split(',')[0] | lower }};"
-        when: ( fsfo_targets.split(',')[0] | lower | trim ) != ( get_active_target.stdout | lower | trim )
-
+      - name: Set Active Target 
+        include: set-fsfo-active-target.yml
+        vars:
+           delegation_host: "{{ groups[ primary ][0] }}"
 
 # Now we have completed the set-up of the Observers (or Password Change) we can allow CRS to start managing their availability again.
 # (This is required to ensure that Observers are restarted if the server is rebooted)
