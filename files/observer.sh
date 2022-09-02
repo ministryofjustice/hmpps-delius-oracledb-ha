@@ -15,7 +15,7 @@
 # This script takes no parameters as it determines the name of
 # the Observer dynamically using the Data Guard broker.
 
-. ~/.bash_profile
+. ~oracle/.bash_profile
 
 export CONFIG="set ObserverConfigFile=${ORACLE_BASE}/dg_observer/observer.ora;"
 
@@ -198,22 +198,24 @@ poll_for_master_observer_host "${OBSERVER_HOST}"
 function get_observer_type()
 {
 OBSERVER=$1
- echo -e "${CONFIG}\nshow observers;"  | dgmgrl -silent / | grep -E "${OBSERVER}" | awk '{print $NF}'
+echo -e "${CONFIG}\nshow observers;"  | dgmgrl -silent / | grep -E "${OBSERVER}" | awk '{print $NF}'
 }
 
 function get_observer()
 {
-echo -e "${CONFIG}\nshow observers;"  | dgmgrl -silent / | grep -E -B3 "Host Name:\\s+$(hostname)$" | grep "Observer \"$(hostname)" | awk '{print $2}'
+# Observer name may under certain conditions be suffixed with the version in parenthesis - this information should be excluded
+# Note that the case of the hostname within the Observer name may change from that which was specified, so use case insensitive search
+echo -e "${CONFIG}\nshow observers;"  | dgmgrl -silent / | grep -E -B3 "Host Name:\\s+$(hostname)$" | grep -i "Observer \"$(hostname)" | awk '{print $2}' | awk -F \( '{print $1}'
 }
 
 function get_cwcn()
 {
-echo -e "${CONFIG}\nshow observers;" | dgmgrl -silent | grep "Submitted command \"SHOW OBSERVER\" using connect identifier" | awk '{print $NF}'
+echo -e "${CONFIG}\nshow observers;" | dgmgrl -silent / | grep "Submitted command \"SHOW OBSERVER\" using connect identifier" | awk '{print $NF}'
 }
 
 function status_observer()
 {
-echo -e "${CONFIG}\nshow observers;" | dgmgrl -silent 
+echo -e "${CONFIG}\nshow observers;" | dgmgrl -silent /
 }
 
 function poll_for_observer()
@@ -238,7 +240,10 @@ THIS_CWCN=$(get_cwcn)
 # Check Data Guard does not have any errors before attempting to start
 # the Observer
 check_data_guard
-echo -e "${CONFIG}\nconnect /\nstart observer in background file is ${ORACLE_BASE}/dg_observer/fsfo.dat logfile is ${ORACLE_BASE}/dg_observer/observer.log connect identifier is ${THIS_CWCN};" | dgmgrl -silent
+# As of Oracle 19.16 the Observer will start with "noname" by default, which prevents multiple Observers starting
+# as they will all have the same name.  As a workaround use the hostname suffixed by 1 which replicates the
+# behaviour of earlier versions.
+echo -e "${CONFIG}\nconnect /\nstart observer \"$(hostname)1\" in background file is ${ORACLE_BASE}/dg_observer/fsfo.dat logfile is ${ORACLE_BASE}/dg_observer/observer.log connect identifier is ${THIS_CWCN};" | dgmgrl -silent
 poll_for_observer
 echo
 # Check the Active Target database is set to the preferred database

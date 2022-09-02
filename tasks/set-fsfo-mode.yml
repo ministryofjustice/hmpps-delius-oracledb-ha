@@ -15,8 +15,8 @@
         delegate_to: "{{ delegation_host }}"
         when:
             - ( get_fast_start_failover.stdout | trim ) != 'Disabled'
-            - ( (get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | lower == 'enabled') )
-              or ( (not get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | lower == 'observe') )
+            - ( (get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | default('disabled') | lower == 'enabled') )
+              or ( (not get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | default('disabled') | lower == 'observe') )
 
       # Accept both 'observe' or 'observer' as a valid mode
       - name: Enable Observe-Only Mode
@@ -26,7 +26,7 @@
         delegate_to: "{{ delegation_host }}"
         when:
             - not get_fast_start_failover.stdout is search("Observe-Only Mode")
-            - fsfo_mode | lower == 'observe' or fsfo_mode | lower == 'observer'
+            - fsfo_mode | default('disabled') | lower in ['observe','observer']
 
       - name: Enable FSFO Mode
         shell: |
@@ -35,4 +35,4 @@
         delegate_to: "{{ delegation_host }}"
         when:
             - get_fast_start_failover.stdout is search("Observe-Only Mode") or get_fast_start_failover.stdout is search("Disabled")
-            - fsfo_mode | lower == 'enabled'
+            - fsfo_mode | default('disabled') | lower == 'enabled'
