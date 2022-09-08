@@ -6,10 +6,6 @@
   delegate_to: "{{ delegation_host }}"
   changed_when: false
 
-- name: Initialize List of Databases in Configuration
-  set_fact:
-      databases_in_configuration: []  
-
 # List Index 0=Primary 1=1st Standby 2=2nd Standby
 - name: Populate List of Databases in Configuration
   set_fact:
@@ -24,14 +20,14 @@
         set_fact:
           fsfo_targets: "{{ databases_in_configuration[1] }}"
         when: 
-          - inventory_hostname in groups[ primary ]
+          - delegation_host == primary_hostname
           - ( databases_in_configuration | length | int ) < 3
 
       - name: Determine Required FSFO Targets for Primary (Double Standby)
         set_fact:
           fsfo_targets: "{{ databases_in_configuration[1] }},{{ databases_in_configuration[2] }}"
         when: 
-          - inventory_hostname in groups[ primary ]
+          - delegation_host == primary_hostname
           - ( databases_in_configuration | length ) == 3
           - databases_in_configuration[1] < databases_in_configuration[2]
 
@@ -39,7 +35,7 @@
         set_fact:
           fsfo_targets: "{{ databases_in_configuration[2] }},{{ databases_in_configuration[1] }}"
         when: 
-          - inventory_hostname in groups[ primary ]
+          - delegation_host == primary_hostname
           - ( databases_in_configuration | length ) == 3
           - databases_in_configuration[2] < databases_in_configuration[1]
 
@@ -47,7 +43,7 @@
         set_fact:
           fsfo_targets: "{{ databases_in_configuration[0] }}"
         when: 
-          - inventory_hostname in ( groups[ standby1 ] + groups[ standby2 ] )
+          - delegation_host in [standby1_hostname,standby2_hostname]
           - ( databases_in_configuration | length | int ) < 3
 
       # If we have added a second standby then the FSFO target should be the primary and the *other* standby
@@ -55,7 +51,7 @@
         set_fact:
           fsfo_targets: "{{ databases_in_configuration[0] }},{{ databases_in_configuration[1] }}"
         when: 
-          - inventory_hostname in ( groups[ standby1 ] + groups[ standby2 ] )
+          - delegation_host in [standby1_hostname,standby2_hostname]
           - ( database_standby_sid | lower ) != ( databases_in_configuration[1] | lower )
           - ( databases_in_configuration | length | int ) == 3
 
@@ -63,7 +59,7 @@
         set_fact:
           fsfo_targets: "{{  databases_in_configuration[0] }},{{ databases_in_configuration[2] }}"
         when: 
-          - inventory_hostname in ( groups[ standby1 ] + groups[ standby2 ] )
+          - delegation_host in [standby1_hostname,standby2_hostname]
           - ( databases_in_configuration | length | int ) == 3
           - ( database_standby_sid | lower ) != ( databases_in_configuration[2] | default('no_such_database') | lower )
     
