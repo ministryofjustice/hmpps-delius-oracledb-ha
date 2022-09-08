@@ -370,7 +370,7 @@
       - name: Configure FSFO (Existing 1st Standby)
         shell: |
                . ~/.bash_profile
-               dgmgrl / "edit database {{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] }} set property FastStartFailoverTarget='{{ hostvars[groups[ primary ][0]]['database_primary_sid'] }},{{ hostvars[groups[ standby2 ][0]]['database_standby_sid'] }}';"
+               dgmgrl / "edit database {{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] }} set property FastStartFailoverTarget='{{ hostvars[groups[ primary ][0]]['database_primary_sid'] | lower }},{{ hostvars[groups[ standby2 ][0]]['database_standby_sid'] | lower }}';"
         when: (fsfo_targets | lower ) != (  hostvars[groups[ primary ][0]]['database_primary_sid'] + "," + hostvars[groups[ standby2 ][0]]['database_standby_sid'] | lower )
         delegate_to:  "{{ hostvars[groups[ standby1 ][0]]['inventory_hostname'] }}"
 
@@ -398,7 +398,7 @@
       - name: Configure FSFO (Existing 2nd Standby)
         shell: |
                . ~/.bash_profile
-               dgmgrl  -silent / "edit database {{ hostvars[groups[ standby2 ][0]]['database_standby_sid'] }} set property FastStartFailoverTarget='{{ hostvars[groups[ primary ][0]]['database_primary_sid'] }},{{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] }}';"
+               dgmgrl  -silent / "edit database {{ hostvars[groups[ standby2 ][0]]['database_standby_sid'] }} set property FastStartFailoverTarget='{{ hostvars[groups[ primary ][0]]['database_primary_sid'] | lower }},{{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower }}';"
         when: (fsfo_targets | lower ) != ( hostvars[groups[ primary ][0]]['database_primary_sid'] + "," + hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower )
         delegate_to:  "{{ hostvars[groups[ standby2 ][0]]['inventory_hostname'] }}"
 
