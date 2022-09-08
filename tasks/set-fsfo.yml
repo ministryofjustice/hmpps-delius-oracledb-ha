@@ -351,8 +351,8 @@
 # If we have just added a new 2nd Standby it should be added as a Failover option to an existing 1st Standby
 - name: Add New 2nd Standby as Failover Option for Existing 1st Standby
   when: 
-     - standby_number == 2
-     - hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower in databases_in_configuration
+     - standby_number | int == 2
+     - ( hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower ) in databases_in_configuration
   run_once: yes
   block:
 
@@ -379,8 +379,8 @@
 # but the 2nd standby is still available, and the 1st standby is now being rebuilt
 - name: Add New 1st Standby as Failover Option for Existing 2nd Standby
   when: 
-     - standby_number == 1
-     - hostvars[groups[ standby2 ][0]]['database_standby_sid'] | lower in databases_in_configuration
+     - standby_number | int == 1
+     - ( hostvars[groups[ standby2 ][0]]['database_standby_sid'] | lower ) in databases_in_configuration
   run_once: yes
   block:
 
