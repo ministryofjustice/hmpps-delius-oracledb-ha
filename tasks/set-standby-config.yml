@@ -32,6 +32,52 @@
     group: "{{ rdbms_service_user.group }}"
     marker: "# {mark} ANSIBLE MANAGED BLOCK ADD {{ database_standby_unique_name }} DATABASE"
 
+# The next two tasks ensure the TNSNames file also contains entries for the *other* standby database
+# in the case of a 2-standby configuration
+- name: Add Other Standby to TNSNames File
+  when: high_availability_count | int == 2
+  block:
+
+      - name: (main/set-standby-config) Add standby tnsnames for optional 2nd standby
+        blockinfile:
+          create: yes
+          path: '{{ oracle_database_oracle_home }}/network/admin/tnsnames.ora'  
+          block: |
+
+            {{ hostvars[groups[ standby2 ][0]]['database_standby_unique'] }} =
+            (DESCRIPTION =
+              (ADDRESS = (PROTOCOL = TCP)(HOST = {{ standby_host2_tns }})(PORT = 1521))
+                (CONNECT_DATA = 
+                  (SERVER = DEDICATED) 
+                  (SERVICE_NAME = {{ hostvars[groups[ standby2 ][0]]['database_standby_unique'] }})
+                )
+              )
+
+          owner: "{{ rdbms_service_user.name }}"
+          group: "{{ rdbms_service_user.group }}"
+          marker: "# {mark} ANSIBLE MANAGED BLOCK ADD {{ hostvars[groups[ standby2 ][0]]['database_standby_unique'] }} DATABASE"
+        when: standby_number | int == 1 
+
+      - name: (main/set-standby-config) Add standby tnsnames for 1st standby
+        blockinfile:
+          create: yes
+          path: '{{ oracle_database_oracle_home }}/network/admin/tnsnames.ora'  
+          block: |
+
+            {{ hostvars[groups[ standby1 ][0]]['database_standby_unique'] }} =
+            (DESCRIPTION =
+              (ADDRESS = (PROTOCOL = TCP)(HOST = {{ standby_host1_tns }})(PORT = 1521))
+                (CONNECT_DATA = 
+                  (SERVER = DEDICATED) 
+                  (SERVICE_NAME = {{ hostvars[groups[ standby1 ][0]]['database_standby_unique'] }})
+                )
+              )
+
+          owner: "{{ rdbms_service_user.name }}"
+          group: "{{ rdbms_service_user.group }}"
+          marker: "# {mark} ANSIBLE MANAGED BLOCK ADD {{ hostvars[groups[ standby1 ][0]]['database_standby_unique'] }} DATABASE"
+        when: standby_number | int == 2
+
 - name: (main/set-standby-config) Setup standby listener 
   blockinfile: 
     path: '{{ oracle_grid_oracle_home }}/network/admin/listener.ora'

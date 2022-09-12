@@ -6,10 +6,27 @@
               . ~/.bash_profile
                dgmgrl -silent / "show fast_start failover;" | awk '/Active Target:/{print $3}'
         register: get_active_target
+        delegate_to: "{{ delegation_host }}"
         changed_when: false
 
-      - name: Set Preferred Active Target
-        shell: |
-               . ~/.bash_profile
-               dgmgrl -silent / "set fast_start failover target to {{ fsfo_targets.split(',')[0] | lower }};"
-        when: ( fsfo_targets.split(',')[0] | lower | trim ) != ( get_active_target.stdout | lower | trim )
+      - name: Change Active Target
+        when: preferred_active_target != ( get_active_target.stdout | lower | trim )
+        block:
+
+          - name: Set Preferred Active Target
+            shell: |
+                  . ~/.bash_profile
+                  dgmgrl -silent / "set fast_start failover target to {{ preferred_active_target }};"
+            delegate_to: "{{ delegation_host }}"
+       
+          # It takes a little while for the Active target to change so poll for this
+          - name: Check Change to Active Target
+            shell: |
+                  . ~/.bash_profile
+                  dgmgrl -silent / "show fast_start failover;" | awk '/Active Target:/{print $3}'
+            register: get_new_active_target
+            delegate_to: "{{ delegation_host }}"
+            changed_when: false
+            retries: 20
+            delay: 20
+            until: preferred_active_target == ( get_new_active_target.stdout | lower | trim )

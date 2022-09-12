@@ -39,17 +39,6 @@
                     . ~/.bash_profile
                     dgmgrl  / "edit configuration set property ConfigurationWideServiceName='{{ configuration_wide_service_name }}'"
 
-- name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
-  set_fact:
-    standby1: "{{ primary  | regex_replace('(.*)_primarydb$','\\1_standbydb1') }}"
-    standby2: "{{ primary  | regex_replace('(.*)_primarydb$','\\1_standbydb2') }}"
-
-- name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
-  set_fact:
-    primary_host_tns: "{{  hostvars[groups[ primary ][0]]['inventory_hostname']  | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
-    standby_host1_tns: "{{ hostvars[groups[ standby1 ][0]]['inventory_hostname']  | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
-    standby_host2_tns: "{{ hostvars[groups[ standby2 ][0]]['inventory_hostname']  | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
-
 - name: Add Optional HA1 TNS Address
   set_fact:
      ha1_address: "(ADDRESS = (PROTOCOL = TCP)(HOST = {{ standby_host1_tns }})(PORT = 1521))"
@@ -323,77 +312,21 @@
   set_fact:
       current_fsfo_targets: "{{ get_FastStartFailoverTarget.stdout_lines[-1] | replace(\"'\",'') |  trim }}"
 
-- name: Get Databases Currently in Configuration
-  shell: |
-         . ~/.bash_profile
-         dgmgrl  / "show configuration;" | awk '/.* - .*database/{if(flag==1){print $0}}/Members:/{flag=1}/^Fast-Start Failover/{flag=0}'
-  register: get_databases_in_configuration
-  delegate_to: "{{ groups[ primary ][0] }}"
-  changed_when: false
-  run_once: yes
-
-- name: Initialize List of Databases in Configuration
+- name: Initialize Databases Currently in Configuration
   set_fact:
-      databases_in_configuration: []  
+      databases_in_configuration: []
 
-# List Index 0=Primary 1=1st Standby 2=2nd Standby
-- name: Populate List of Databases in Configuration
+- name: Initialize FSFO Targets
   set_fact:
-      databases_in_configuration: "{{ databases_in_configuration + [ item.split('-')[0] | trim ] }}"
-  loop: "{{ get_databases_in_configuration.stdout_lines }}"
-  delegate_to: "{{ groups[ primary ][0] }}"
-  run_once: yes
+      fsfo_targets: ''
 
-- name: Determine Expected FSFO Targets Depending on Configuration
-  block:
-
-      - name: Determine Required FSFO Targets for Primary (Single Standby)
-        set_fact:
-          fsfo_targets: "{{ databases_in_configuration[1] }}"
-        when: 
-          - inventory_hostname in groups[ primary ]
-          - ( databases_in_configuration | length | int ) < 3
-
-      - name: Determine Required FSFO Targets for Primary (Double Standby)
-        set_fact:
-          fsfo_targets: "{{ databases_in_configuration[1] }},{{ databases_in_configuration[2] }}"
-        when: 
-          - inventory_hostname in groups[ primary ]
-          - ( databases_in_configuration | length ) == 3
-          - databases_in_configuration[1] < databases_in_configuration[2]
-
-      - name: Determine Required FSFO Targets for Primary (Double Standby)
-        set_fact:
-          fsfo_targets: "{{ databases_in_configuration[2] }},{{ databases_in_configuration[1] }}"
-        when: 
-          - inventory_hostname in groups[ primary ]
-          - ( databases_in_configuration | length ) == 3
-          - databases_in_configuration[2] < databases_in_configuration[1]
-
-      - name: Determine Required FSFO Target (Primary) for New First Standby
-        set_fact:
-          fsfo_targets: "{{ databases_in_configuration[0] }}"
-        when: 
-          - inventory_hostname in ( groups[ standby1 ] + groups[ standby2 ] )
-          - ( databases_in_configuration | length | int ) < 3
-
-      # If we have added a second standby then the FSFO target should be the primary and the *other* standby
-      - name: Determine Required FSFO Target (Primary,1st Standby) for New Second Standby
-        set_fact:
-          fsfo_targets: "{{ databases_in_configuration[0] }},{{ databases_in_configuration[1] }}"
-        when: 
-          - inventory_hostname in ( groups[ standby1 ] + groups[ standby2 ] )
-          - ( database_standby_sid | lower ) != ( databases_in_configuration[1] | lower )
-          - ( databases_in_configuration | length | int ) == 3
-
-      - name: Determine Required FSFO Target (Primary,2nd Standby) for New Second Standby
-        set_fact:
-          fsfo_targets: "{{  databases_in_configuration[0] }},{{ databases_in_configuration[2] }}"
-        when: 
-          - inventory_hostname in ( groups[ standby1 ] + groups[ standby2 ] )
-          - ( databases_in_configuration | length | int ) == 3
-          - ( database_standby_sid | lower ) != ( databases_in_configuration[2] | default('no_such_database') | lower )
-
+- name: Get FSFO Targets
+  include_tasks: determine-fsfo-targets.yml  
+  vars:
+     delegation_host: "{{ inventory_hostname }}"
+     primary_hostname: "{{ groups[ primary ][0] }}"
+     standby1_hostname:  "{{ groups[ standby1 ][0] }}"
+     standby2_hostname:  "{{ groups[ standby2 ][0] | default('') }}"
      
 - name: Configure FSFO Targets (New Standby)
   shell: |
@@ -401,11 +334,25 @@
          dgmgrl / "edit database {{ database_primary_sid | default(database_standby_sid) }} set property FastStartFailoverTarget='{{ fsfo_targets }}';"
   when: (fsfo_targets | lower ) != ( current_fsfo_targets | lower )
 
+
+
+- debug:
+    var: standby_number
+
+- debug:
+    var: standby1
+
+- debug:
+    var: hostvars[groups[ standby1 ][0]]['database_standby_sid'] 
+
+- debug:
+    var: databases_in_configuration
+
 # If we have just added a new 2nd Standby it should be added as a Failover option to an existing 1st Standby
 - name: Add New 2nd Standby as Failover Option for Existing 1st Standby
   when: 
-     - standby_number == 2
-     - hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower in databases_in_configuration
+     - standby_number | int == 2
+     - ( hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower ) in databases_in_configuration
   run_once: yes
   block:
 
@@ -423,18 +370,17 @@
       - name: Configure FSFO (Existing 1st Standby)
         shell: |
                . ~/.bash_profile
-               dgmgrl / "edit database {{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] }} set property FastStartFailoverTarget='{{ hostvars[groups[ primary ][0]]['database_primary_sid'] }},{{ hostvars[groups[ standby2 ][0]]['database_standby_sid'] }}';"
+               dgmgrl / "edit database {{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] }} set property FastStartFailoverTarget='{{ hostvars[groups[ primary ][0]]['database_primary_sid'] | lower }},{{ hostvars[groups[ standby2 ][0]]['database_standby_sid'] | lower }}';"
         when: (fsfo_targets | lower ) != (  hostvars[groups[ primary ][0]]['database_primary_sid'] + "," + hostvars[groups[ standby2 ][0]]['database_standby_sid'] | lower )
         delegate_to:  "{{ hostvars[groups[ standby1 ][0]]['inventory_hostname'] }}"
-
 
 # If we have just added a new 1st Standby it should be added as a Failover option to an existing 2nd Standby
 # This block is unlikely to be called much.   It will only be called under the scenario that the 1st standby has been lost
 # but the 2nd standby is still available, and the 1st standby is now being rebuilt
 - name: Add New 1st Standby as Failover Option for Existing 2nd Standby
   when: 
-     - standby_number == 1
-     - hostvars[groups[ standby2 ][0]]['database_standby_sid'] | lower in databases_in_configuration
+     - standby_number | int == 1
+     - ( hostvars[groups[ standby2 ][0]]['database_standby_sid'] | lower ) in databases_in_configuration
   run_once: yes
   block:
 
@@ -452,7 +398,7 @@
       - name: Configure FSFO (Existing 2nd Standby)
         shell: |
                . ~/.bash_profile
-               dgmgrl  -silent / "edit database {{ hostvars[groups[ standby2 ][0]]['database_standby_sid'] }} set property FastStartFailoverTarget='{{ hostvars[groups[ primary ][0]]['database_primary_sid'] }},{{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] }}';"
+               dgmgrl  -silent / "edit database {{ hostvars[groups[ standby2 ][0]]['database_standby_sid'] }} set property FastStartFailoverTarget='{{ hostvars[groups[ primary ][0]]['database_primary_sid'] | lower }},{{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower }}';"
         when: (fsfo_targets | lower ) != ( hostvars[groups[ primary ][0]]['database_primary_sid'] + "," + hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower )
         delegate_to:  "{{ hostvars[groups[ standby2 ][0]]['inventory_hostname'] }}"
 
@@ -607,12 +553,19 @@
         include: place-fsfo-observer.yml
         vars:
            delegation_host: "{{ groups[ primary ][0] }}"
+           master_observer_target_host: "{{ hostvars[groups[ standby1 ][0]]['my_hostname'] }}"
+           master_observer_target_database: "{{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] }}"
+           databases_in_data_guard: "{{ databases_in_configuration }}"
+           fallback_master_observer_target_host: "{{ hostvars[groups[ standby2 ][0]]['my_hostname'] }}"
+           fallback_master_observer_target_database: "{{ hostvars[groups[ standby2 ][0]]['database_standby_sid'] }}"
 
+      # The currently preferred active target is the first FastStartFailoverTarget on the primary
       - name: Set Active Target 
         include: set-fsfo-active-target.yml
         vars:
            delegation_host: "{{ groups[ primary ][0] }}"
-
+           preferred_active_target: "{{ hostvars[groups[ primary ][0]]['fsfo_targets'].split(',')[0] | lower | trim }}"
+           
 # Now we have completed the set-up of the Observers (or Password Change) we can allow CRS to start managing their availability again.
 # (This is required to ensure that Observers are restarted if the server is rebooted)
 - name: Check if CRS Resource is Still Disabled

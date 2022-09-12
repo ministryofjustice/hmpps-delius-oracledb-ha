@@ -6,6 +6,7 @@ HOSTING_MEMBERS={{ ec2_hostname }}
 CARDINALITY=1
 ENABLED=1
 INSTANCE_FAILOVER=0
+RESTART_ATTEMPTS=3
 START_DEPENDENCIES=hard(intermediate:ora.{{ db_service }}.db)
 STOP_DEPENDENCIES=hard(shutdown:ora.{{ db_service }}.db)
 START_TIMEOUT=300
