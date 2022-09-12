@@ -25,10 +25,10 @@
   tags: var
 
 - debug: 
-    var=standby1
+    var=primary_host
 
 - debug: 
-    var=standby2
+    var=standby_host
 
 - name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
   set_fact:
