@@ -24,6 +24,12 @@
     standby2: "{{ primary  | regex_replace('(.*)_primarydb$','\\1_standbydb2') }}"
   tags: var
 
+- debug: 
+    var=standby1
+
+- debug: 
+    var=standby2
+
 - name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
   set_fact:
     primary_host_tns: "{{ primary_host | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
