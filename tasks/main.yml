@@ -29,14 +29,17 @@
     fsfo_setup: true
   when:  method is defined and method == "fsfo setup"
 
-# The following variables are not required if we are only running FSFO Setup
 - name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
   set_fact:
     primary_host_tns: "{{ primary_host | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
-    standby_host_tns: "{{ standby_host | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
     standby_host1_tns: "{{ hostvars[groups[ standby1 ][0]]['inventory_hostname']  | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
     standby_host2_tns: "{{ hostvars[groups[ standby2 ][0]]['inventory_hostname']  | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
-  when: not fsfo_setup
+  tags: var
+
+# The following variable is not required if we are only running FSFO Setup (system-wide configuration - not specific to one standby database)
+- name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
+  set_fact:
+    standby_host_tns: "{{ standby_host | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
   tags: var
 
 - name: (main) Set up oracle specific variables
