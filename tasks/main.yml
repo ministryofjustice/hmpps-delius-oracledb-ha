@@ -29,6 +29,11 @@
     fsfo_setup: true
   when:  method is defined and method == "fsfo setup"
 
+- name: (main/set-primary-config) Gather facts with dns filter
+  setup:
+    filter: ansible_dns
+  tags: var
+
 - name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
   set_fact:
     primary_host_tns: "{{ primary_host | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
@@ -56,11 +61,6 @@
     - set_fact:
         oracle_database_oracle_home: "{{ oracle_home.stdout }}"
         oracle_grid_oracle_home: "{{ grid_home.stdout }}"
-  tags: var
-
-- name: (main/set-primary-config) Gather facts with dns filter
-  setup:
-    filter: ansible_dns
   tags: var
 
 - block:
