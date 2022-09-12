@@ -13,8 +13,11 @@
 - name: Set ansible_dns
   setup:
      filter:
-        - ansible_dns
+        - 'ansible_dns'
   when: ansible_dns is not defined
+
+- debug: 
+    var=ansible_dns
 
 - name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
   set_fact:
