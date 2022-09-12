@@ -12,8 +12,7 @@
 # has already not been done elsewhere
 - name: Set ansible_dns
   setup:
-     filter:
-        - 'ansible_dns'
+     filter: ansible_dns
   when: ansible_dns is not defined
 
 - debug: 
