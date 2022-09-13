@@ -380,7 +380,7 @@
 - name: Add New 1st Standby as Failover Option for Existing 2nd Standby
   when: 
      - standby_number | int == 1
-     - high_availability_count > 1
+     - high_availability_count | int > 1
      - ( hostvars[groups[ standby2 ][0]]['database_standby_sid'] | lower ) in databases_in_configuration
   run_once: yes
   block:
