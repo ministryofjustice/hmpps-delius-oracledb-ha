@@ -44,7 +44,7 @@
 - name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
   set_fact:
       standby_host2_tns: "{{ hostvars[groups[ standby2 ][0]]['inventory_hostname']  | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
-  when: hostvars[groups[ standby2 ][0]] is defined
+  when: high_availability_count > 1
   tags: var
 
 # The following variable is not required if we are only running FSFO Setup (system-wide configuration - not specific to one standby database)
