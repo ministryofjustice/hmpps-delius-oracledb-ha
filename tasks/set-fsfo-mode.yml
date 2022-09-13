@@ -16,7 +16,7 @@
         when:
             - ( get_fast_start_failover.stdout | trim ) != 'Disabled'
             - ( (get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | default('disabled') | lower == 'enabled') )
-              or ( (not get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | default('disabled') | lower == 'observe') )
+              or ( (not get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | default('disabled') | lower in ['observe','observer']) )
 
       # Accept both 'observe' or 'observer' as a valid mode
       - name: Enable Observe-Only Mode
