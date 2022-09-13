@@ -522,15 +522,15 @@
 - name: Start 1st Standby Observer
   script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ configuration_wide_service_name }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
   when: 
-      - inventory_hostname in groups[ standby1 ]
       - standby_number | int >= 1
+      - inventory_hostname in groups[ standby1 ]
       - my_hostname not in ( observer_dict.values() | map(attribute='hostname') | list )
 
 - name: Start 2nd Standby Observer
   script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ configuration_wide_service_name }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
   when: 
-      - inventory_hostname in groups[ standby2 ]
       - standby_number | int == 2
+      - inventory_hostname in groups[ standby2 ]
       - my_hostname not in ( observer_dict.values() | map(attribute='hostname') | list )
 
 # Observer on Primary is not initially useful but may be required following switchover or failover.
