@@ -283,6 +283,23 @@
               dgmgrl -silent  / 'edit configuration set property ObserverReconnect = {{ target_fsfo_observer_reconnect }};'
         when: ( target_fsfo_observer_reconnect | int ) != ( current_observer_reconnect | int )
 
+      - name: Get Fast Start Failover Timeout Threshold
+        shell: |
+              . ~/.bash_profile
+              dgmgrl -silent  / 'show configuration FastStartFailoverThreshold;' | awk -F= '{print $2}'
+        register: get_FSFOThreshold
+        changed_when: false
+
+      - name: Set Fast Start Failover Timeout Threshold
+        set_fact:
+            current_fsfo_threshold: "{{ get_FSFOThreshold.stdout_lines[-1] | replace(\"'\",'') |  trim }}"
+
+      - name: Configure Fast Start Failover Timeout Threshold
+        shell: |               
+              . ~/.bash_profile
+              dgmgrl -silent  / 'edit configuration set property FastStartFailoverThreshold = {{ target_fsfo_threshold }};'
+        when: ( target_fsfo_threshold | int ) != ( current_fsfo_threshold | int )
+
       # All databases which have a standby are run in Maximum Availability Mode
       - name: Get Protection Mode
         shell: |

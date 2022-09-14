@@ -18,5 +18,9 @@ rdbms_service_user:
 # Define conditions on which we wish to failover
 target_fsfo_health_conditions: ["Corrupted Controlfile","Corrupted Dictionary","Stuck Archiver","Datafile Write Errors","Inaccessible Logfile"]
 
+# During AWS Start/Stop we occassionally have disconnections about around 60-70 seconds during DB re-start.
+# 120 seconds provides sufficent overhead for these to automatically resolve and prevent false failover.
+target_fsfo_threshold: 120
+
 # Define the polling interval to the primary (seconds)
 target_fsfo_observer_reconnect: 60
