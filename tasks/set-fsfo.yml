@@ -536,6 +536,10 @@
 
       - debug: var=observer_dict
 
+      # Ensure the SYS account is unlocked (it may have become locked due to failed logins using the old password)
+      - name: Unlock SYS Account
+        script: unlock_sys_password.sh
+        
 - name: Start 1st Standby Observer
   script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ configuration_wide_service_name }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
   when: 
