@@ -124,14 +124,6 @@
     group: "{{ rdbms_service_user.group }}"
     marker: "# {mark} ANSIBLE MANAGED BLOCK ADD DATA GUARD WALLET"
 
-- name: If Credential Exists Check that it Works
-  shell: |
-          . ~/.bash_profile
-          echo exit | sqlplus -S -L /@{{ configuration_wide_service_name }} as sysdba
-  register: check_password
-  ignore_errors: True
-  when: ( get_configuration_wide_service_name_in_wallet.stdout | int ) > 0
-
 - name: Get sys password from ssm parameter store
   shell: . /etc/environment && aws ssm get-parameters --region ${REGION} --with-decryption --name /${HMPPS_ENVIRONMENT}/${APPLICATION}/${HMPPS_ROLE}-database/db/oradb_sys_password | jq -r '.Parameters[].Value'
   register: get_sys_password
