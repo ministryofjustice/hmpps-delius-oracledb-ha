@@ -1,6 +1,5 @@
 - name: Steps on Primary Only
-  delegate_to: "{{ groups[ primary ][0] }}"
-  run_once: true
+  when: inventory_name == groups[ primary ][0]
   block:
 
       - name: Get Configuration Name
@@ -39,6 +38,10 @@
                     . ~/.bash_profile
                     dgmgrl  / "edit configuration set property ConfigurationWideServiceName='{{ configuration_wide_service_name }}'"
 
+- name: Share Configuration Name with all Hosts
+  set_fact:
+     configuration_name: "{{ hostvars[groups[primary]][0]['configuration_name'] }}"
+
 - name: Add Optional HA1 TNS Address
   set_fact:
      ha1_address: "(ADDRESS = (PROTOCOL = TCP)(HOST = {{ standby_host1_tns }})(PORT = 1521))"
@@ -73,8 +76,6 @@
     . ~/.bash_profile
     echo $ORACLE_BASE
   register: oracle_base_result
-  delegate_to: "{{ groups[ primary ][0] }}"
-  run_once: true
   changed_when: false  
 
 - name: Set Oracle Base
@@ -97,6 +98,10 @@
   args:
     creates: "{{ wallet_dir }}/cwallet.sso"
   register: orapki_out
+
+- name: Report Check
+  debug:
+      msg: "Checking if the credentials exist for {{ configuration_wide_service_name }} in the wallet"
 
 - name: Check if the Configuration-Wide Service Name is Already in the Wallet
   shell: |
@@ -233,8 +238,7 @@
   when: get_crs_resource.stdout is search('.*CRS-2613.*') or not "ENABLED=0" in get_crs_resource.stdout_lines
 
 - name: Steps on Primary Only
-  delegate_to: "{{ groups[ primary ][0] }}"
-  run_once: true
+  when: inventory_name == groups[ primary ][0]
   block:
 
       - name: Get Existing FSFO Health Conditions
@@ -370,7 +374,7 @@
   when: 
      - standby_number | int == 2
      - ( hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower ) in databases_in_configuration
-  run_once: yes
+     - inventory_name == groups[ primary ][0]
   block:
 
       - name: Get FSFO Targets
@@ -399,7 +403,7 @@
      - standby_number | int == 1
      - high_availability_count | int > 1
      - ( hostvars[groups[ standby2 ][0]]['database_standby_sid'] | lower ) in databases_in_configuration
-  run_once: yes
+     - inventory_name == groups[ primary ][0]
   block:
 
       - name: Get FSFO Targets
@@ -421,11 +425,9 @@
         delegate_to:  "{{ hostvars[groups[ standby2 ][0]]['inventory_hostname'] }}"
 
 
-
 # Now Set up Observers for FSFO
 - name: Check Observers from Primary
-  delegate_to: "{{ groups[ primary ][0] }}"
-  run_once: true
+  when: inventory_name == groups[ primary ][0]
   block:
 
       - name: Get Location of Observers
@@ -476,7 +478,6 @@
          hostname
   register: get_hostname_1st_standby
   delegate_to: "{{ groups[ standby1 ][0] }}"
-  run_once: true
   changed_when: false
 
 - debug:
@@ -487,7 +488,6 @@
       my_hostname: "{{ get_hostname_1st_standby.stdout }}" 
   delegate_to: "{{ groups[ standby1 ][0] }}"    
   delegate_facts: true
-  run_once: true
 
 # If we need to stop the Master Observer to change the password, then we will need to disable Fast Start Failover first
 - name: Disable Fast Start Failover
@@ -514,9 +514,9 @@
 
 # If any Observers have been stopped, refresh the dictionary of observers
 - name: Refresh Observers After Stop
-  when: stop_colocate_master.changed or stop_colocate_backup.changed or (( password_update_count | int ) > 0)
-  delegate_to: "{{ groups[ primary ][0] }}"
-  run_once: true
+  when:
+     - stop_colocate_master.changed or stop_colocate_backup.changed or (( password_update_count | int ) > 0)
+     - inventory_name == groups[ primary ][0]
   block:
 
       - name: Get Updated Location of Observers
@@ -539,6 +539,10 @@
       # Ensure the SYS account is unlocked (it may have become locked due to failed logins using the old password)
       - name: Unlock SYS Account
         script: unlock_sys_password.sh
+        register: unlock_sys_account
+
+      - debug:
+           var=unlock_sys_account
         
 - name: Start 1st Standby Observer
   script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ configuration_wide_service_name }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
@@ -563,7 +567,7 @@
       - my_hostname not in ( observer_dict.values() | map(attribute='hostname') | list )
     
 - name: Steps on Primary Only
-  run_once: true
+  when: inventory_name == groups[ primary ][0]
   block:
 
       - name: Set FSFO Mode
