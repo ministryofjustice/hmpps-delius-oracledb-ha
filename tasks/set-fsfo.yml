@@ -472,6 +472,10 @@
             - observer_dict[item].type == 'Backup'
             - observer_dict[item].observer_name != ( observer_dict | dict2items | json_query('[?value.hostname==`' + observer_dict[item].hostname + '`].value.observer_name') | first )
 
+- name: Share Observer Dictionary with all Hosts
+  set_fact:
+     observer_dict: "{{ hostvars[groups[primary][0]]['observer_dict'] }}"
+
 # Even if we are running a build on Standby #2 we still need to know the hostname of Standby #1 as this is the preferred target
 # for the Master Observer.    Therefore we gather this hostname explictly and delegate the fact.
 - name: Get 1st Standby Hostname
