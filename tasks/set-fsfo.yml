@@ -608,7 +608,6 @@
         export ORAENV_ASK=NO
         . oraenv
         crsctl modify resource {{ observer_resource }} -attr "ENABLED=1"
-        crsctl check resource {{ observer_resource }}
   when: not "ENABLED=1" in get_crs_resource.stdout_lines
   
 - name: Check if CRS Resource is Running
@@ -617,7 +616,7 @@
         export ORACLE_SID=+ASM
         export ORAENV_ASK=NO
         . oraenv
-        crsctl check resource {{ observer_resource }}
+        crsctl status resource {{ observer_resource }}
   changed_when: false
   register: get_crs_resource_status
 
