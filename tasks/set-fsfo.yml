@@ -40,6 +40,7 @@
 
 - name: Share Configuration Name with all Hosts
   set_fact:
+     configuration_name: "{{ hostvars[groups[primary][0]]['configuration_name'] }}"
      configuration_wide_service_name: "{{ hostvars[groups[primary][0]]['configuration_wide_service_name'] }}"
 
 - name: Add Optional HA1 TNS Address
