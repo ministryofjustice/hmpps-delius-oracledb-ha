@@ -241,19 +241,27 @@ function stop_defunct_observer()
 # able to communicate with the primary and target databases should be stopped
 BACKUP_OBSERVER_COUNT=$(dgmgrl -silent / "show observer" | grep -A2 $(hostname) | grep -c -- "- Backup")
 MASTER_OBSERVER_COUNT=$(dgmgrl -silent / "show observer" | grep -A2 $(hostname) | grep -c -- "- Master")
-if [[ $BACKUP_OBSERVER_COUNT -gt 1 ||
-     ( $BACKUP_OBSERVER_COUNT -eq 1 && $MASTER_OBSERVER_COUNT -eq 1 ) ]]
+if [[ $BACKUP_OBSERVER_COUNT -eq 1 && $MASTER_OBSERVER_COUNT -eq 1 ]]
+then  
+   # Stop Backup Observer as Master is running on this Host
+    DEFUNCT_OBSERVER_NAME=$(dgmgrl -silent / "show observer" | grep -A3 $(hostname) | grep -- "- Backup" | awk '{print $2}')
+    stop_observer ${DEFUNCT_OBSERVER_NAME}
+fi
+if [[ $BACKUP_OBSERVER_COUNT -gt 1 ]]
 then
-   # More than one observer found. Find and stop the defunct one.
+   # More than one Backup observer found. Find and stop the defunct one.
    DEFUNCT_OBSERVER=$(dgmgrl -silent / "show observer" | grep -A3 $(hostname) | grep -A4 -- "- Backup" | awk '/Observer/{OBSERVER=$2}/(unknown)/{print OBSERVER}' | uniq -c)
    DEFUNCT_PING_COUNT=$(echo $DEFUNCT_OBSERVER | awk '{print $1}')
-   DEFUNCT_OBSERVER_NAME=$(echo $DEFUNCT_OBSEVER | awk '{print $2}')
-   if [[ ${DEFUNCT_PING_COUNT} -eq 2 && ! -z ${DEFUNCT_OBSERVER_NAME} ]];
+   DEFUNCT_OBSERVER_NAME=$(echo $DEFUNCT_OBSERVER | awk '{print $2}')
+   if [[ ${DEFUNCT_PING_COUNT} -eq 1 && ! -z ${DEFUNCT_OBSERVER_NAME} ]];
    then
+      # Stop observer with Unknown Ping Times
       stop_observer ${DEFUNCT_OBSERVER_NAME}
    else
-      echo "Cannot find defunct observer to stop"
-      exit 1 
+      # Both observers have valid Ping Times - Stop the one with the Longest Aggregate (Primary+Target) Ping Time
+      LONGEST_PING=$(dgmgrl -silent / "show observer" | grep -A3 $(hostname) | grep -A4 -- "- Backup" | awk 'BEGIN{SUM=0}/Observer/{OBSERVER=$2}/Last Ping/{SUM+=$5}/--/{print SUM,OBSERVER; SUM=0}END{print SUM,OBSERVER}' | sort -n -k1 | tail -1)
+      DEFUNCT_OBSERVER_NAME=$(echo $LONGEST_PING | awk '{print $2}')
+      stop_observer ${DEFUNCT_OBSERVER_NAME}
    fi
 fi
 }
@@ -273,15 +281,12 @@ poll_for_observer
 echo
 # Check the Active Target database is set to the preferred database
 set_preferred_active_target_database
-poll_for_observer
+# Check for defunct Observers on this host and stop them
+stop_defunct_observer
+echo
 # Check if this is the intended site for the master observer 
 # and change the type of the observer if it is not currently so
 set_master_observer
-poll_for_observer
-echo
-# Check for defunct Observers on this host and stop them
-stop_defunct_observer
-poll_for_observer
 echo
 RC=$(check_observer)
 }
