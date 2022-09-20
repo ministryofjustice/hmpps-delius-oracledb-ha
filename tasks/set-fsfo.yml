@@ -209,7 +209,7 @@
 
 # Do not repeat CRS setup if rotating passwords as we assume this has already been done
 - name: Setup CRS
-  when: fsfo_setup
+  # when: fsfo_setup
   block:
 
       - name: Install CRS Resource Action Script to Control the Observer

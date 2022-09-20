@@ -234,6 +234,31 @@ do
 done
 }
 
+function stop_defunct_observer()
+{
+# It is possible that up to 3 observers may run on a single node
+# This is not desired and any defunct observers no longer
+# able to communicate with the primary and target databases should be stopped
+BACKUP_OBSERVER_COUNT=$(dgmgrl -silent / "show observer" | grep -A2 $(hostname) | grep -c -- "- Backup")
+MASTER_OBSERVER_COUNT=$(dgmgrl -silent / "show observer" | grep -A2 $(hostname) | grep -c -- "- Master")
+if [[ $BACKUP_OBSERVER_COUNT -gt 1 ||
+     ( $BACKUP_OBSERVER_COUNT -eq 1 && $MASTER_OBSERVER_COUNT -eq 1 ) ]]
+then
+   # More than one observer found. Find and stop the defunct one.
+   DEFUNCT_OBSERVER=$(dgmgrl -silent / "show observer" | grep -A3 $(hostname) | grep -A4 -- "- Backup" | awk '/Observer/{OBSERVER=$2}/(unknown)/{print OBSERVER}' | uniq -c)
+   DEFUNCT_PING_COUNT=$(echo $DEFUNCT_OBSERVER | awk '{print $1}')
+   DEFUNCT_OBSERVER_NAME=$(echo $DEFUNCT_OBSEVER | awk '{print $2}')
+   if [[ ${DEFUNCT_PING_COUNT} -eq 2 && ! -z ${DEFUNCT_OBSERVER_NAME} ]];
+   then
+      stop_observer ${DEFUNCT_OBSERVER_NAME}
+   else
+      echo "Cannot find defunct observer to stop"
+      exit 1 
+   fi
+fi
+}
+
+
 function start_observer()
 {
 THIS_CWCN=$(get_cwcn)
@@ -252,6 +277,10 @@ poll_for_observer
 # Check if this is the intended site for the master observer 
 # and change the type of the observer if it is not currently so
 set_master_observer
+poll_for_observer
+echo
+# Check for defunct Observers on this host and stop them
+stop_defunct_observer
 poll_for_observer
 echo
 RC=$(check_observer)
