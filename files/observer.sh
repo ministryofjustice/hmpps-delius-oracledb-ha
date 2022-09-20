@@ -117,10 +117,12 @@ function set_master_observer()
 {
 ACTIVE_TARGET_SID=$(get_active_target_db | tr 'a-z' 'A-Z')
 LOCAL_SID=$(echo $ORACLE_SID | tr 'a-z' 'A-Z')
+# If the target Database is running on this Host, make this the Master Observer
 if [[ ! -z "${ACTIVE_TARGET_SID}"
      && "${ACTIVE_TARGET_SID}" == "${LOCAL_SID}" ]];
 then
-   THIS_OBSERVER=$(get_observer)
+   # Set Any Observer on this Host to be the Master
+   THIS_OBSERVER=$(get_observer | awk '{print $1}')
    THIS_OBSERVER_TYPE=$(get_observer_type ${THIS_OBSERVER})
    if [[ "${THIS_OBSERVER_TYPE}" == "Backup" ]];
    then
@@ -373,7 +375,7 @@ else
 # When we check the observer we expect to find two 1 or 2 digit numbers
 # corresponding to the Ping Times to Primary and Standby.
 # Anything else is considered to be an error.
-for $THIS_OBSERVER in $(echo ${ALL_OBSERVERS})
+for THIS_OBSERVER in $(echo ${ALL_OBSERVERS})
 do
    # Loop through all the Observers (normally there will just be one).   Only one needs to be operation to return a success code.
    echo -e "${CONFIG}\nshow observers;"  | dgmgrl -silent / | grep -A4 "Observer ${THIS_OBSERVER}" | grep "Last Ping to" | awk '{print $5}' | grep -c -E "^[[:digit:]]{1,2}$" | grep -q 2
