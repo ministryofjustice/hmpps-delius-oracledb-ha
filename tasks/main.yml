@@ -29,6 +29,11 @@
     fsfo_setup: true
   when:  method is defined and method == "fsfo setup"
 
+- name: (main) Set fact to only carry out steps needed for password rotation
+  set_fact:
+    password_rotation: true
+  when:  method is defined and method == "password rotation"
+
 - name: (main/set-primary-config) Gather facts with dns filter
   setup:
     filter: ansible_dns
@@ -47,11 +52,13 @@
   when: high_availability_count | int > 1
   tags: var
 
-# The following variable is not required if we are only running FSFO Setup (system-wide configuration - not specific to one standby database)
+# The following variable is not required if we are only running FSFO Setup or Password Rotation (system-wide configuration - not specific to one standby database)
 - name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
   set_fact:
     standby_host_tns: "{{ standby_host | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
-  when: not fsfo_setup
+  when: 
+     - not fsfo_setup
+     - not password_rotation
   tags: var
 
 - name: (main) Set up oracle specific variables
@@ -81,7 +88,7 @@
       become_user: "{{ rdbms_service_user.name }}"
       tags: fsfo
 
-  when: fsfo_setup
+  when: fsfo_setup or password_rotation
 
 - block:
     - name: (main) Configure Oracle data guard broker
@@ -108,7 +115,7 @@
     - meta: end_play
   when: post_restore
 
-# Provided we are not running FSFO Set-Up, run all of the following block
+# Provided we are not running FSFO Set-Up or Password Rotation, run all of the following block
 # to build the HA
 - block:
 
@@ -176,7 +183,9 @@
         include: restore-primary-to-standby.yml
         tags: restore
 
-        when: not fsfo_setup
+        when: 
+          - not fsfo_setup
+          - not password_rotation
 
       - block:
           - name: (main) Configure Oracle data guard broker
@@ -204,4 +213,6 @@
 
         when: not post_restore and not update_ssm_parameter_restore 
 
-  when: not fsfo_setup
+  when: 
+     - not fsfo_setup
+     - not password_rotation

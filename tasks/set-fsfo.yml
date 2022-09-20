@@ -43,86 +43,91 @@
      configuration_name: "{{ hostvars[groups[primary][0]]['configuration_name'] }}"
      configuration_wide_service_name: "{{ hostvars[groups[primary][0]]['configuration_wide_service_name'] }}"
 
-- name: Add Optional HA1 TNS Address
-  set_fact:
-     ha1_address: "(ADDRESS = (PROTOCOL = TCP)(HOST = {{ standby_host1_tns }})(PORT = 1521))"
-  when: (high_availability_count | int | default(0)) >= 1 
+# We do not need to do the following if we are only rotating the password as we assume that FSFO has already been configured
+- name: Setup Connectivity
+  when: fsfo_setup
+  block:
 
-- name: Add Optional HA2 TNS Address
-  set_fact:
-     ha2_address: "(ADDRESS = (PROTOCOL = TCP)(HOST = {{ standby_host2_tns }})(PORT = 1521))"
-  when: (high_availability_count | int | default(0)) == 2 
+      - name: Add Optional HA1 TNS Address
+        set_fact:
+          ha1_address: "(ADDRESS = (PROTOCOL = TCP)(HOST = {{ standby_host1_tns }})(PORT = 1521))"
+        when: (high_availability_count | int | default(0)) >= 1 
 
-- name: Add Configuration-Wide Service TNS Names Alias
-  blockinfile:
-    create: yes
-    path: '{{ oracle_database_oracle_home }}/network/admin/tnsnames.ora'  
-    block: |
+      - name: Add Optional HA2 TNS Address
+        set_fact:
+          ha2_address: "(ADDRESS = (PROTOCOL = TCP)(HOST = {{ standby_host2_tns }})(PORT = 1521))"
+        when: (high_availability_count | int | default(0)) == 2 
 
-      {{ configuration_wide_service_name }} =
-      (DESCRIPTION =
-        (ADDRESS_LIST = 
-            (ADDRESS = (PROTOCOL = TCP)(HOST = {{ primary_host_tns }})(PORT = 1521)){{ ha1_address | default('') }}{{ ha2_address | default('') }})
-              (CONNECT_DATA =
-                (SERVER = DEDICATED) 
-                (SERVICE_NAME = {{ configuration_wide_service_name }})
-           )
-       )
-    owner: "{{ rdbms_service_user.name }}"
-    group: "{{ rdbms_service_user.group }}"
-    marker: "# {mark} ANSIBLE MANAGED BLOCK ADD CONFIGURATION-WIDE SERVICE NAME"
+      - name: Add Configuration-Wide Service TNS Names Alias
+        blockinfile:
+          create: yes
+          path: '{{ oracle_database_oracle_home }}/network/admin/tnsnames.ora'  
+          block: |
 
-- name: Get Oracle Base
-  shell: |
-    . ~/.bash_profile
-    echo $ORACLE_BASE
-  register: oracle_base_result
-  changed_when: false  
+            {{ configuration_wide_service_name }} =
+            (DESCRIPTION =
+              (ADDRESS_LIST = 
+                  (ADDRESS = (PROTOCOL = TCP)(HOST = {{ primary_host_tns }})(PORT = 1521)){{ ha1_address | default('') }}{{ ha2_address | default('') }})
+                    (CONNECT_DATA =
+                      (SERVER = DEDICATED) 
+                      (SERVICE_NAME = {{ configuration_wide_service_name }})
+                )
+            )
+          owner: "{{ rdbms_service_user.name }}"
+          group: "{{ rdbms_service_user.group }}"
+          marker: "# {mark} ANSIBLE MANAGED BLOCK ADD CONFIGURATION-WIDE SERVICE NAME"
 
-- name: Set Oracle Base
-  set_fact: 
-    oracle_base: "{{ oracle_base_result.stdout }}"
-
-- name: Define Location for Oracle Wallet
-  set_fact:
-    wallet_dir: "{{ oracle_base }}/wallets/dg_wallet"
-  
-- name: Create Wallet Directory
-  file: 
-    path: "{{ wallet_dir }}"
-    state: directory
-
-- name: Create Wallet if it does not already exist
-  shell: |
-        . ~/.bash_profile
-        orapki wallet create -wallet {{ wallet_dir }} -auto_login_only
-  args:
-    creates: "{{ wallet_dir }}/cwallet.sso"
-  register: orapki_out
-
-- name: Report Check
-  debug:
-      msg: "Checking if the credentials exist for {{ configuration_wide_service_name }} in the wallet"
-
-- name: Check if the Configuration-Wide Service Name is Already in the Wallet
-  shell: |
+      - name: Get Oracle Base
+        shell: |
           . ~/.bash_profile
-          mkstore -wrl {{ wallet_dir }} -listCredential | grep -c ": {{ configuration_wide_service_name }} sys$" | cat
-  register: get_configuration_wide_service_name_in_wallet
-  changed_when: false
+          echo $ORACLE_BASE
+        register: oracle_base_result
+        changed_when: false  
 
-- name: Add Wallet Location to SQLNET Config
-  blockinfile:
-    create: yes
-    path: '{{ oracle_database_oracle_home }}/network/admin/sqlnet.ora'  
-    block: |
+      - name: Set Oracle Base
+        set_fact: 
+          oracle_base: "{{ oracle_base_result.stdout }}"
 
-      WALLET_LOCATION=(SOURCE=(METHOD=file)(METHOD_DATA=(DIRECTORY={{ wallet_dir }})))
-      SQLNET.WALLET_OVERRIDE=true
+      - name: Define Location for Oracle Wallet
+        set_fact:
+          wallet_dir: "{{ oracle_base }}/wallets/dg_wallet"
+        
+      - name: Create Wallet Directory
+        file: 
+          path: "{{ wallet_dir }}"
+          state: directory
 
-    owner: "{{ rdbms_service_user.name }}"
-    group: "{{ rdbms_service_user.group }}"
-    marker: "# {mark} ANSIBLE MANAGED BLOCK ADD DATA GUARD WALLET"
+      - name: Create Wallet if it does not already exist
+        shell: |
+              . ~/.bash_profile
+              orapki wallet create -wallet {{ wallet_dir }} -auto_login_only
+        args:
+          creates: "{{ wallet_dir }}/cwallet.sso"
+        register: orapki_out
+
+      - name: Report Check
+        debug:
+            msg: "Checking if the credentials exist for {{ configuration_wide_service_name }} in the wallet"
+
+      - name: Check if the Configuration-Wide Service Name is Already in the Wallet
+        shell: |
+                . ~/.bash_profile
+                mkstore -wrl {{ wallet_dir }} -listCredential | grep -c ": {{ configuration_wide_service_name }} sys$" | cat
+        register: get_configuration_wide_service_name_in_wallet
+        changed_when: false
+
+      - name: Add Wallet Location to SQLNET Config
+        blockinfile:
+          create: yes
+          path: '{{ oracle_database_oracle_home }}/network/admin/sqlnet.ora'  
+          block: |
+
+            WALLET_LOCATION=(SOURCE=(METHOD=file)(METHOD_DATA=(DIRECTORY={{ wallet_dir }})))
+            SQLNET.WALLET_OVERRIDE=true
+
+          owner: "{{ rdbms_service_user.name }}"
+          group: "{{ rdbms_service_user.group }}"
+          marker: "# {mark} ANSIBLE MANAGED BLOCK ADD DATA GUARD WALLET"
 
 - name: Get sys password from ssm parameter store
   shell: . /etc/environment && aws ssm get-parameters --region ${REGION} --with-decryption --name /${HMPPS_ENVIRONMENT}/${APPLICATION}/${HMPPS_ROLE}-database/db/oradb_sys_password | jq -r '.Parameters[].Value'
@@ -160,15 +165,20 @@
   set_fact:
       observer_config_dir: "{{ oracle_base }}/dg_observer"
 
-- name: Create Observer Configuration Directory
-  file:
-      path: "{{ observer_config_dir }}"
-      state: directory
+# Do not repeat Observer Config setup if rotating passwords as we assume this has already been done
+- name: Setup Observer Config
+  when: fsfo_setup
+  block:
 
-- name: Install Observer Configuration File
-  template:
-    src: observer.j2
-    dest: "{{ observer_config_dir }}/observer.ora"
+      - name: Create Observer Configuration Directory
+        file:
+            path: "{{ observer_config_dir }}"
+            state: directory
+
+      - name: Install Observer Configuration File
+        template:
+          src: observer.j2
+          dest: "{{ observer_config_dir }}/observer.ora"
 
 # We require the hostname (EC2 Hostname) as supplied by the hostname command as this is what is used by the Data Guard Broker to identify hosts
 - name: Get Hostname
@@ -181,43 +191,48 @@
   set_fact:
       my_hostname: "{{ get_hostname.stdout }}"
 
-- name: Install CRS Resource Action Script to Control the Observer
-  copy:
-    src: observer.sh
-    dest: "{{ observer_config_dir }}/observer.sh"
-    mode: u+rwx
-  
-- name: Install CRS Resource Attributes for Observer
-  template:
-    src: observer.config.j2
-    dest: "{{ observer_config_dir }}/observer.config"
-  vars:
-    observer_script: "{{ observer_config_dir }}/observer.sh"
-    ec2_hostname: "{{ my_hostname }}"
-    db_service: "{{ database_primary_sid | default(database_standby_sid) | lower }}"
-
 - name: Define Name for CRS Resource for Observer
   set_fact:
       observer_resource: "dg.observer"
 
-- name: Check if CRS Resource Already Exists
-  shell: |
-        . ~/.bash_profile
-        export ORACLE_SID=+ASM
-        export ORAENV_ASK=NO
-        . oraenv
-        crsctl status resource {{ observer_resource }} -p
-  changed_when: false
-  register: get_crs_resource
+# Do not repeat CRS setup if rotating passwords as we assume this has already been done
+- name: Setup CRS
+  when: fsfo_setup
+  block:
 
-- name: Add CRS Resource for Observer
-  shell: |
-        . ~/.bash_profile
-        export ORACLE_SID=+ASM
-        export ORAENV_ASK=NO
-        . oraenv
-        crsctl add resource {{ observer_resource }} -type cluster_resource -file {{ observer_config_dir }}/observer.config
-  when: get_crs_resource.stdout is search('.*CRS-2613.*')
+      - name: Install CRS Resource Action Script to Control the Observer
+        copy:
+          src: observer.sh
+          dest: "{{ observer_config_dir }}/observer.sh"
+          mode: u+rwx
+        
+      - name: Install CRS Resource Attributes for Observer
+        template:
+          src: observer.config.j2
+          dest: "{{ observer_config_dir }}/observer.config"
+        vars:
+          observer_script: "{{ observer_config_dir }}/observer.sh"
+          ec2_hostname: "{{ my_hostname }}"
+          db_service: "{{ database_primary_sid | default(database_standby_sid) | lower }}"
+
+      - name: Check if CRS Resource Already Exists
+        shell: |
+              . ~/.bash_profile
+              export ORACLE_SID=+ASM
+              export ORAENV_ASK=NO
+              . oraenv
+              crsctl status resource {{ observer_resource }} -p
+        changed_when: false
+        register: get_crs_resource
+
+      - name: Add CRS Resource for Observer
+        shell: |
+              . ~/.bash_profile
+              export ORACLE_SID=+ASM
+              export ORAENV_ASK=NO
+              . oraenv
+              crsctl add resource {{ observer_resource }} -type cluster_resource -file {{ observer_config_dir }}/observer.config
+        when: get_crs_resource.stdout is search('.*CRS-2613.*')
 
 # Whilst we are working on configuring / resetting the Observers we want to temporarily remove them from the control of CRS
 # so that it does not attempt to restart the resources at a time not of our choosing
@@ -230,8 +245,11 @@
         crsctl modify resource {{ observer_resource }} -attr "ENABLED=0"
   when: get_crs_resource.stdout is search('.*CRS-2613.*') or not "ENABLED=0" in get_crs_resource.stdout_lines
 
+# Setup steps only - do not change FSFO configuration during password rotation
 - name: Steps on Primary Only
-  when: inventory_hostname == groups[ primary ][0]
+  when: 
+     - inventory_hostname == groups[ primary ][0]
+     - fsfo_setup
   block:
 
       - name: Get Existing FSFO Health Conditions
@@ -326,6 +344,9 @@
   set_fact:
       current_fsfo_targets: "{{ get_FastStartFailoverTarget.stdout_lines[-1] | replace(\"'\",'') |  trim }}"
 
+# Much of the following steps are notionally set-up only; but we run them again during a password rotation to correct any misplacement of
+# observers which may have occurred due to password changes causing automated changes in the configuration which we do not want.
+
 - name: Initialize Databases Currently in Configuration
   set_fact:
       databases_in_configuration: []
@@ -347,20 +368,6 @@
          . ~/.bash_profile
          dgmgrl / "edit database {{ database_primary_sid | default(database_standby_sid) }} set property FastStartFailoverTarget='{{ fsfo_targets }}';"
   when: (fsfo_targets | lower ) != ( current_fsfo_targets | lower )
-
-
-
-- debug:
-    var: standby_number
-
-- debug:
-    var: standby1
-
-- debug:
-    var: hostvars[groups[ standby1 ][0]]['database_standby_sid'] 
-
-- debug:
-    var: databases_in_configuration
 
 # If we have just added a new 2nd Standby it should be added as a Failover option to an existing 1st Standby
 - name: Add New 2nd Standby as Failover Option for Existing 1st Standby
