@@ -186,9 +186,9 @@ done
 function relocate_master_observer()
 {
 # Try relocating master observer to one of the other hosts until it succeeds
-for OBSERVER_HOST in $(get_backup_observer_hosts);
+for OBSERVER_HOST in $(get_backup_observer_hosts)
 do
-   if [[ "$HOSTNAME" != "${OBSERVER_HOST}"]];
+   if [[ "$HOSTNAME" != "${OBSERVER_HOST}" ]]
    then
       set_master_observer_host ${OBSERVER_HOST}
       [[ $? == 0 ]] && break
@@ -378,6 +378,7 @@ do
    # Loop through all the Observers (normally there will just be one).   Only one needs to be operation to return a success code.
    echo -e "${CONFIG}\nshow observers;"  | dgmgrl -silent / | grep -A4 "Observer ${THIS_OBSERVER}" | grep "Last Ping to" | awk '{print $5}' | grep -c -E "^[[:digit:]]{1,2}$" | grep -q 2
    if [[ $? -eq 0 ]];
+   then
       echo 0
       return
    fi
