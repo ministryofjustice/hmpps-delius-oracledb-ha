@@ -185,11 +185,15 @@ done
 
 function relocate_master_observer()
 {
+# Try relocating master observer to one of the other hosts until it succeeds
 for OBSERVER_HOST in $(get_backup_observer_hosts);
 do
-   set_master_observer_host ${OBSERVER_HOST}
-   [[ $? == 0 ]] && break
-   echo "Relocation failed"
+   if [[ "$HOSTNAME" != "${OBSERVER_HOST}"]];
+   then
+      set_master_observer_host ${OBSERVER_HOST}
+      [[ $? == 0 ]] && break
+      echo "Relocation failed"
+   fi
 done  
 poll_for_master_observer_host "${OBSERVER_HOST}" 
 } 
@@ -201,11 +205,12 @@ OBSERVER=$1
 echo -e "${CONFIG}\nshow observers;"  | dgmgrl -silent / | grep -E "${OBSERVER}" | awk '{print $NF}'
 }
 
-function get_observer()
+function get_observers()
 {
-# Observer name may under certain conditions be suffixed with the version in parenthesis - this information should be excluded
+# Return tab delimited list of the names of all Observers running on this host (normally expect 0 or 1, but there can be up to 3).
+# Observer name may under certain conditions (such as during patching) be suffixed with the version in parenthesis - this information should be excluded
 # Note that the case of the hostname within the Observer name may change from that which was specified, so use case insensitive search
-echo -e "${CONFIG}\nshow observers;"  | dgmgrl -silent / | grep -E -B3 "Host Name:\\s+$(hostname)$" | grep -i "Observer \"$(hostname)" | awk '{print $2}' | awk -F \( '{print $1}'
+dgmgrl -silent / "show observer;" | grep -E -B3 "Host Name:\\s+$(hostname)$" | grep -i "Observer \"$(hostname)" | awk '{print $2}' | awk -F \( '{print $1}' | paste - -
 }
 
 function get_cwcn()
@@ -324,49 +329,60 @@ exit 1
 
 function stop_observer()
 {
-THIS_OBSERVER=$(get_observer)
-THIS_OBSERVER_TYPE=$(get_observer_type ${THIS_OBSERVER})
-# If stopping the Master Observer, if any Backup Observers exist then
-# one of these must be converted to the Master first 
-if [[ "${THIS_OBSERVER_TYPE}" == "Master" ]];
-then
-   BACKUP_COUNT=$(count_backup_observers)
-   if [[ ${BACKUP_COUNT} -gt 0 ]];
-   then
-      echo "Converting to Backup Observer"
-      relocate_master_observer
+# Stop all Observers running on this host
+for THIS_OBSERVER in $(get_observers)
+do
       THIS_OBSERVER_TYPE=$(get_observer_type ${THIS_OBSERVER})
+      # If stopping the Master Observer, if any Backup Observers exist then
+      # one of these must be converted to the Master first 
       if [[ "${THIS_OBSERVER_TYPE}" == "Master" ]];
       then
+         BACKUP_COUNT=$(count_backup_observers)
          if [[ ${BACKUP_COUNT} -gt 0 ]];
          then
-            echo "Cannot Stop Master Observer as Backup Observers Still Exist"
-            exit 1
+            echo "Converting to Backup Observer"
+            relocate_master_observer
+            THIS_OBSERVER_TYPE=$(get_observer_type ${THIS_OBSERVER})
+            if [[ "${THIS_OBSERVER_TYPE}" == "Master" ]];
+            then
+               if [[ ${BACKUP_COUNT} -gt 0 ]];
+               then
+                  echo "Cannot Stop Master Observer as Backup Observers Still Exist"
+                  exit 1
+               fi
+            fi
+         else
+            echo "No Backup Observers - Stopping Master"
          fi
       fi
-   else
-      echo "No Backup Observers - Stopping Master"
-   fi
-fi
-if [[ ! -z ${THIS_OBSERVER} ]];
-then
-   stop_named_observer ${THIS_OBSERVER}
-fi
+      if [[ ! -z ${THIS_OBSERVER} ]];
+      then
+         stop_named_observer ${THIS_OBSERVER}
+      fi
+done
 }
 
 function check_observer()
 {
-THIS_OBSERVER=$(get_observer)
+ALL_OBSERVERS=$(get_observers)
 # Return error code if no observer found on this host
-if [[ -z "${THIS_OBSERVER}" ]];
+if [[ -z "${ALL_OBSERVERS}" ]];
 then
    echo 1
 else
 # When we check the observer we expect to find two 1 or 2 digit numbers
 # corresponding to the Ping Times to Primary and Standby.
 # Anything else is considered to be an error.
+for $THIS_OBSERVER in $(echo ${ALL_OBSERVERS})
+do
+   # Loop through all the Observers (normally there will just be one).   Only one needs to be operation to return a success code.
    echo -e "${CONFIG}\nshow observers;"  | dgmgrl -silent / | grep -A4 "Observer ${THIS_OBSERVER}" | grep "Last Ping to" | awk '{print $5}' | grep -c -E "^[[:digit:]]{1,2}$" | grep -q 2
-   echo $?
+   if [[ $? -eq 0 ]];
+      echo 0
+      return
+   fi
+done
+echo 1
 fi
 }
 

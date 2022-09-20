@@ -438,152 +438,22 @@
         when: (fsfo_targets | lower ) != ( hostvars[groups[ primary ][0]]['database_primary_sid'] + "," + hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower )
         delegate_to:  "{{ hostvars[groups[ standby2 ][0]]['inventory_hostname'] }}"
 
-
-# Now Set up Observers for FSFO
-- name: Check Observers from Primary
-  when: inventory_hostname == groups[ primary ][0]
-  block:
-
-      - name: Get Location of Observers
-        script: get_observer_hosts.sh "{{ observer_config_dir }}/observer.ora"
-        register: get_observer_hosts
-        changed_when: false
-
-      - name: Initialize Observer List
-        set_fact:
-            observer_dict: {}
-
-      # When run in CodeBuild the output of the get_observer_hosts.sh script includes the Ansible BECOME-SUCCESS marker when there are no Observers for unclear reasons.
-      # This does not happen when run locally so is difficult to debug.   As a workaround we simply ignore the output if it contains BECOME-SUCCESS-
-      # This marker does not appear when Observers do exist.
-      - name: Populate Observer Dictionary
-        set_fact:
-            observer_dict: "{{ observer_dict | combine({item.split(' ')[0]: {'observer_name': item.split(' ')[0], 'type': item.split(' ')[1], 'hostname': item.split(' ')[2]}}) }}"
-        loop: "{{ get_observer_hosts.stdout_lines | default([]) }}"
-        when: not get_observer_hosts.stdout is search ("BECOME-SUCCESS-")
-
-      - name: Stop Any Backup Observers Co-Located on Master (Want Only One per AZ)
-        shell: |
-              . ~/.bash_profile        
-              dgmgrl / "stop observer {{ item }};"
-              sleep 10
-        loop: "{{ observer_dict.keys() }}"
-        register: stop_colocate_master
-        when: 
-            - observer_dict[item].type == 'Backup'
-            - observer_dict[item].hostname == ( observer_dict | dict2items | json_query('[?value.type==`Master`].value.hostname') | first )
-
-      # Stop Non-First Co-Located Observer (We do not want to stop both Observers when they running on one host - just one of them)
-      - name: Stop Any Backup Observers Co-Located on Another Backup (Want Only One per AZ)
-        shell: |
-              . ~/.bash_profile
-              dgmgrl / "stop observer {{ item }};"
-              sleep 10
-        loop: "{{ observer_dict.keys() }}"
-        register: stop_colocate_backup
-        when: 
-            - observer_dict[item].type == 'Backup'
-            - observer_dict[item].observer_name != ( observer_dict | dict2items | json_query('[?value.hostname==`' + observer_dict[item].hostname + '`].value.observer_name') | first )
-
-- name: Share Observer Dictionary with all Hosts
-  set_fact:
-     observer_dict: "{{ hostvars[groups[primary][0]]['observer_dict'] }}"
-
-# Even if we are running a build on Standby #2 we still need to know the hostname of Standby #1 as this is the preferred target
-# for the Master Observer.    Therefore we gather this hostname explictly and delegate the fact.
-- name: Get 1st Standby Hostname
-  shell: | 
-         hostname
-  register: get_hostname_1st_standby
-  delegate_to: "{{ groups[ standby1 ][0] }}"
-  changed_when: false
-
-- debug:
-    msg: "Hostname 1st Standby: {{ get_hostname_1st_standby.stdout }}"
-
-- name: Set 1st Standby Hostname
-  set_fact:
-      my_hostname: "{{ get_hostname_1st_standby.stdout }}" 
-  delegate_to: "{{ groups[ standby1 ][0] }}"    
-  delegate_facts: true
-
-# If we need to stop the Master Observer to change the password, then we will need to disable Fast Start Failover first
+# Disable Fast Start Failover before stopping Observers to prevent a failover attempt
 - name: Disable Fast Start Failover
   shell: |
       . ~/.bash_profile
       dgmgrl / "disable fast_start failover;"
-  when: 
-     - my_hostname == ( observer_dict | dict2items | json_query('[?value.type==`Master`].value.hostname') | first | default('none') )
-     - ( password_update_count | int ) > 0
+  when: inventory_hostname == groups[ primary ][0]
 
-- debug: 
-     msg: "{{ observer_dict | dict2items | json_query('[?value.hostname==`' + my_hostname + '`].value.observer_name') | list }}"
-
-# Stop all the Observers on this host if the password has been changed to then allow it to restart with the new password
+# Stop all the Observers on this host to allow it to restart with the new password
 # Note that the stopping of Observers can take a long time to complete
 - name: Stop Observers if Password Changed
-  script: stop_observer.sh "{{ observer_config_dir }}/observer.ora" "{{ item }}"
-  loop: "{{ observer_dict | dict2items | json_query('[?value.hostname==`' + my_hostname + '`].value.observer_name') | list }}"
-  when: 
-    - ( password_update_count | int ) > 0
-    - ( item | length ) > 1
+  shell: |
+         . ~/.bash_profile
+         {{ observer_config_dir }}/observer.sh stop
   vars:
     ansible_aws_ssm_timeout: 600
-
-# If any Observers have been stopped, refresh the dictionary of observers
-- name: Refresh Observers After Stop
-  when:
-     - stop_colocate_master.changed or stop_colocate_backup.changed or (( password_update_count | int ) > 0)
-     - inventory_hostname == groups[ primary ][0]
-  block:
-
-      - name: Get Updated Location of Observers
-        script: get_observer_hosts.sh "{{ observer_config_dir }}/observer.ora"
-        register: get_observer_hosts
-        changed_when: false
-
-      - name: Re-Initialize Observer Dictionary
-        set_fact:
-            observer_dict: {}
-
-      - name: Re-Populate Observer Dictionary
-        set_fact:
-            observer_dict: "{{ observer_dict | combine({item.split(' ')[0]: {'observer_name': item.split(' ')[0], 'type': item.split(' ')[1], 'hostname': item.split(' ')[2]}}) }}"
-        loop: "{{ get_observer_hosts.stdout_lines | default([])  }}"
-        when: not get_observer_hosts.stdout is search ("BECOME-SUCCESS")
-
-      - debug: var=observer_dict
-
-      # Ensure the SYS account is unlocked (it may have become locked due to failed logins using the old password)
-      - name: Unlock SYS Account
-        script: unlock_sys_password.sh
-        register: unlock_sys_account
-
-      - debug:
-           var=unlock_sys_account
-        
-- name: Start 1st Standby Observer
-  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ configuration_wide_service_name }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
-  when: 
-      - standby_number | int >= 1
-      - inventory_hostname in groups[ standby1 ]
-      - my_hostname not in ( observer_dict.values() | map(attribute='hostname') | list )
-
-- name: Start 2nd Standby Observer
-  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ configuration_wide_service_name }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
-  when: 
-      - standby_number | int == 2
-      - inventory_hostname in groups[ standby2 ]
-      - my_hostname not in ( observer_dict.values() | map(attribute='hostname') | list )
-
-# Observer on Primary is not initially useful but may be required following switchover or failover.
-# Set it to initially monitor the 1st Standby
-- name: Start Primary Observer
-  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ configuration_wide_service_name }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
-  when: 
-      - inventory_hostname in groups[ primary ]
-      - my_hostname not in ( observer_dict.values() | map(attribute='hostname') | list )
-    
+     
 - name: Steps on Primary Only
   when: inventory_hostname == groups[ primary ][0]
   block:
@@ -593,16 +463,6 @@
         vars:
            delegation_host: "{{ groups[ primary ][0] }}"
 
-      - name: Set Placement of FSFO Observer Mode
-        include: place-fsfo-observer.yml
-        vars:
-           delegation_host: "{{ groups[ primary ][0] }}"
-           master_observer_target_host: "{{ hostvars[groups[ standby1 ][0]]['my_hostname'] }}"
-           master_observer_target_database: "{{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] }}"
-           databases_in_data_guard: "{{ databases_in_configuration }}"
-           fallback_master_observer_target_host: "{{ hostvars[groups[ standby2 ][0]]['my_hostname'] }}"
-           fallback_master_observer_target_database: "{{ hostvars[groups[ standby2 ][0]]['database_standby_sid'] }}"
-
       # The currently preferred active target is the first FastStartFailoverTarget on the primary
       - name: Set Active Target 
         include: set-fsfo-active-target.yml
@@ -610,52 +470,5 @@
            delegation_host: "{{ groups[ primary ][0] }}"
            preferred_active_target: "{{ hostvars[groups[ primary ][0]]['fsfo_targets'].split(',')[0] | lower | trim }}"
            
-# Now we have completed the set-up of the Observers (or Password Change) we can allow CRS to start managing their availability again.
-# (This is required to ensure that Observers are restarted if the server is rebooted)
-- name: Check if CRS Resource is Still Disabled
-  shell: |
-        . ~/.bash_profile
-        export ORACLE_SID=+ASM
-        export ORAENV_ASK=NO
-        . oraenv
-        crsctl status resource {{ observer_resource }} -p
-  changed_when: false
-  register: get_crs_resource
-
-- name: Re-Enable CRS Resource for Observer
-  shell: |
-        . ~/.bash_profile
-        export ORACLE_SID=+ASM
-        export ORAENV_ASK=NO
-        . oraenv
-        crsctl modify resource {{ observer_resource }} -attr "ENABLED=1"
-  when: not "ENABLED=1" in get_crs_resource.stdout_lines
-  
-- name: Check if CRS Resource is Running
-  shell: |
-        . ~/.bash_profile
-        export ORACLE_SID=+ASM
-        export ORAENV_ASK=NO
-        . oraenv
-        crsctl status resource {{ observer_resource }}
-  changed_when: false
-  register: get_crs_resource_status
-
-# Ensure the SYS account is unlocked (it may have become locked due to failed logins using the old password)
-- name: Unlock SYS Account
-  script: unlock_sys_password.sh
-  register: unlock_sys_account
-
-- name: Start Offline CRS Resource
-  shell: |
-         . ~/.bash_profile
-         export ORACLE_SID=+ASM
-         export ORAENV_ASK=NO
-         . oraenv
-         crsctl start res dg.observer
-  when: get_crs_resource_status.stdout is search('.*STATE=OFFLINE.*')
-  register: start_observer
-  retries: 3
-  delay: 60
-  until: start_observer is not failed or start_observer.stdout is search('.*CRS-5702.*')
-  failed_when: start_observer.rc !=0 and not start_observer.stdout is search('.*CRS-5702.*') 
+- name: Restart Observers
+  include: start-observer.yml
