@@ -44,6 +44,6 @@
   when: get_crs_resource_status.stdout is search('.*STATE=OFFLINE.*')
   register: start_observer
   retries: 3
-  delay: 60
+  delay: 400
   until: start_observer is not failed or start_observer.stdout is search('.*CRS-5702.*')
   failed_when: start_observer.rc !=0 and not start_observer.stdout is search('.*CRS-5702.*') 
