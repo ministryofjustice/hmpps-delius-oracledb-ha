@@ -27,6 +27,8 @@
         when:
             - not get_fast_start_failover.stdout is search("Observe-Only Mode")
             - fsfo_mode | default('disabled') | lower in ['observe','observer']
+        vars:
+            ansible_aws_ssm_timeout: 60
 
       - name: Enable FSFO Mode
         shell: |

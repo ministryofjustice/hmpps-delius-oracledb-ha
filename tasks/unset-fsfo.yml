@@ -12,7 +12,9 @@
         . oraenv
         crsctl status resource {{ observer_resource }}
   changed_when: false
-  register: get_crs_resource
+  register: get_crs_resource 
+  vars:
+      ansible_aws_ssm_timeout: 60
 
 - name: Delete CRS Resource for Observer
   shell: |

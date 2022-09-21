@@ -226,6 +226,7 @@
           observer_script: "{{ observer_config_dir }}/observer.sh"
           ec2_hostname: "{{ my_hostname }}"
           db_service: "{{ database_primary_sid | default(database_standby_sid) | lower }}"
+          ansible_aws_ssm_timeout: 60
 
 - name: Check if CRS Resource Already Exists
   shell: |
