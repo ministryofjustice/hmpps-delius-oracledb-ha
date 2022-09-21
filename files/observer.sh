@@ -276,25 +276,32 @@ fi
 
 function start_observer()
 {
-THIS_CWCN=$(get_cwcn)
-# Check Data Guard does not have any errors before attempting to start
-# the Observer
-check_data_guard
-# As of Oracle 19.16 the Observer will start with "noname" by default, which prevents multiple Observers starting
-# as they will all have the same name.  As a workaround use the hostname suffixed by 1 which replicates the
-# behaviour of earlier versions.
-echo -e "${CONFIG}\nconnect /\nstart observer \"$(hostname)1\" in background file is ${ORACLE_BASE}/dg_observer/fsfo.dat logfile is ${ORACLE_BASE}/dg_observer/observer.log connect identifier is ${THIS_CWCN};" | dgmgrl -silent
-poll_for_observer
-echo
-# Check the Active Target database is set to the preferred database
-set_preferred_active_target_database
-# Check for defunct Observers on this host and stop them
-stop_defunct_observer
-echo
-# Check if this is the intended site for the master observer 
-# and change the type of the observer if it is not currently so
-set_master_observer
-echo
+EXISTING_OBSERVER_ERROR=$(check_observer)
+# An non-zero code will be returned if there is no existing observer or it has errors.   In this case start an Observer.
+if [[ "${EXISTING_OBSERVER_ERROR}" -gt 0 ]];
+then
+      THIS_CWCN=$(get_cwcn)
+      # Check Data Guard does not have any errors before attempting to start
+      # the Observer
+      check_data_guard
+      # As of Oracle 19.16 the Observer will start with "noname" by default, which prevents multiple Observers starting
+      # as they will all have the same name.  As a workaround use the hostname suffixed by 1 which replicates the
+      # behaviour of earlier versions.
+      echo -e "${CONFIG}\nconnect /\nstart observer \"$(hostname)1\" in background file is ${ORACLE_BASE}/dg_observer/fsfo.dat logfile is ${ORACLE_BASE}/dg_observer/observer.log connect identifier is ${THIS_CWCN};" | dgmgrl -silent
+      poll_for_observer
+      echo
+      # Check the Active Target database is set to the preferred database
+      set_preferred_active_target_database
+      # Check for defunct Observers on this host and stop them
+      stop_defunct_observer
+      echo
+      # Check if this is the intended site for the master observer 
+      # and change the type of the observer if it is not currently so
+      set_master_observer
+      echo
+else
+    echo "Observer already started"
+fi
 RC=$(check_observer)
 }
 
@@ -366,6 +373,7 @@ done
 
 function check_observer()
 {
+# Return success code 0 if an observer is running with a sensible ping time (less than 100 seconds)
 ALL_OBSERVERS=$(get_observers)
 # Return error code if no observer found on this host
 if [[ -z "${ALL_OBSERVERS}" ]];
