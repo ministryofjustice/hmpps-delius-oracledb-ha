@@ -121,8 +121,8 @@ LOCAL_SID=$(echo $ORACLE_SID | tr 'a-z' 'A-Z')
 if [[ ! -z "${ACTIVE_TARGET_SID}"
      && "${ACTIVE_TARGET_SID}" == "${LOCAL_SID}" ]];
 then
-   # Set Any Observer on this Host to be the Master
-   THIS_OBSERVER=$(get_observer | awk '{print $1}')
+   # Set Any Observer on this Host to be the Master (Arbitrarily the First)
+   THIS_OBSERVER=$(get_observers | awk '{print $1}')
    THIS_OBSERVER_TYPE=$(get_observer_type ${THIS_OBSERVER})
    if [[ "${THIS_OBSERVER_TYPE}" == "Backup" ]];
    then
