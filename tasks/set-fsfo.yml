@@ -211,27 +211,6 @@
   set_fact:
       observer_resource: "dg.observer"
 
-# Do not repeat CRS setup if rotating passwords as we assume this has already been done
-- name: Setup CRS
-  when: not password_rotation
-  block:
-
-      - name: Install CRS Resource Action Script to Control the Observer
-        copy:
-          src: observer.sh
-          dest: "{{ observer_config_dir }}/observer.sh"
-          mode: u+rwx
-        
-      - name: Install CRS Resource Attributes for Observer
-        template:
-          src: observer.config.j2
-          dest: "{{ observer_config_dir }}/observer.config"
-        vars:
-          observer_script: "{{ observer_config_dir }}/observer.sh"
-          ec2_hostname: "{{ my_hostname }}"
-          db_service: "{{ database_primary_sid | default(database_standby_sid) | lower }}"
-          ansible_aws_ssm_timeout: 60
-
 - name: Check if CRS Resource Already Exists
   shell: |
         . ~/.bash_profile
@@ -253,16 +232,32 @@
      - get_crs_resource.stdout is search('.*CRS-2613.*')
      - not password_rotation
 
-# Whilst we are working on configuring / resetting the Observers we want to temporarily remove them from the control of CRS
-# so that it does not attempt to restart the resources at a time not of our choosing
-- name: Disable CRS Resource for Observer
-  shell: |
-        . ~/.bash_profile
-        export ORACLE_SID=+ASM
-        export ORAENV_ASK=NO
-        . oraenv
-        crsctl modify resource {{ observer_resource }} -attr "ENABLED=0"
-  when: get_crs_resource.stdout is search('.*CRS-2613.*') or not "ENABLED=0" in get_crs_resource.stdout_lines
+# Ensure all Observers are Currently Stopped and FSFO Disabled whilst changes in progress
+- name: Disable FSFO and Stop Observers
+  include: stop-observer.yml
+
+# Do not repeat CRS setup if rotating passwords as we assume this has already been done
+- name: Setup CRS
+  when: not password_rotation
+  block:
+
+      - name: Install CRS Resource Action Script to Control the Observer
+        copy:
+          src: observer.sh
+          dest: "{{ observer_config_dir }}/observer.sh"
+          mode: u+rwx
+        
+      - name: Install CRS Resource Attributes for Observer
+        template:
+          src: observer.config.j2
+          dest: "{{ observer_config_dir }}/observer.config"
+        vars:
+          observer_script: "{{ observer_config_dir }}/observer.sh"
+          ec2_hostname: "{{ my_hostname }}"
+          db_service: "{{ database_primary_sid | default(database_standby_sid) | lower }}"
+          ansible_aws_ssm_timeout: 60
+
+
 
 # Setup steps only - do not change FSFO configuration during password rotation
 - name: Steps on Primary Only
@@ -442,27 +437,6 @@
                dgmgrl  -silent / "edit database {{ hostvars[groups[ standby2 ][0]]['database_standby_sid'] }} set property FastStartFailoverTarget='{{ hostvars[groups[ primary ][0]]['database_primary_sid'] | lower }},{{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower }}';"
         when: (fsfo_targets | lower ) != ( hostvars[groups[ primary ][0]]['database_primary_sid'] + "," + hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower )
         delegate_to:  "{{ hostvars[groups[ standby2 ][0]]['inventory_hostname'] }}"
-
-# Disable Fast Start Failover before stopping Observers to prevent a failover attempt
-# (We can skip this for password rotation as it will have already been done by the Rotation task)
-- name: Disable Fast Start Failover
-  shell: |
-      . ~/.bash_profile
-      dgmgrl / "disable fast_start failover;"
-  when:
-     - inventory_hostname == groups[ primary ][0]
-     - not password_rotation
-  vars:
-          ansible_aws_ssm_timeout: 60
-
-# Stop all the Observers on this host to allow it to restart with the new password
-# Note that the stopping of Observers can take a long time to complete
-- name: Stop Observers to Allow Restart
-  shell: |
-         . ~/.bash_profile
-         {{ observer_config_dir }}/observer.sh stop
-  vars:
-    ansible_aws_ssm_timeout: 600
      
 - name: Steps on Primary Only
   when: inventory_hostname == groups[ primary ][0]
