@@ -91,30 +91,6 @@
 
   when: fsfo_setup or password_rotation
 
-- block:
-    - name: (main) Configure Oracle data guard broker
-      include: set-primary-dgbroker.yml
-      when: inventory_hostname in groups[ primary ]
-
-    - name: (main) Setup taf service name
-      include: set-taf-service.yml
-
-    - name: (main) Remove FSFO
-      include: unset-fsfo.yml
-      when: ( fsfo_mode | default('disabled')) == 'disabled'
-      become: true
-      become_user: "{{ rdbms_service_user.name }}"
-      tags: fsfo
-
-    - name: (main) Configure FSFO
-      include: set-fsfo.yml
-      when: ( hostvars[groups[ primary ][0]]['fsfo_mode']   | default('disabled')) != 'disabled'
-      become: true
-      become_user: "{{ rdbms_service_user.name }}"
-      tags: fsfo
-
-    - meta: end_play
-  when: post_restore
 
 # Provided we are not running FSFO Set-Up or Password Rotation, run all of the following block
 # to build the HA
@@ -184,36 +160,40 @@
         include: restore-primary-to-standby.yml
         tags: restore
 
-        when: 
-          - not fsfo_setup
-          - not password_rotation
+  when: 
+     - not post_restore
+     - not fsfo_setup
+     - not password_rotation
 
-      - block:
-          - name: (main) Configure Oracle data guard broker
-            include: set-primary-dgbroker.yml
-            when: inventory_hostname in groups[ primary ]
-            tags: dg
+- block:
 
-          - name: (main) Setup taf service name
-            include: set-taf-service.yml
-            tags: taf
+    - name: (main) Configure Oracle data guard broker
+      include: set-primary-dgbroker.yml
+      when: inventory_hostname in groups[ primary ]
 
-          - name: (main) Remove FSFO
-            include: unset-fsfo.yml
-            when: ( fsfo_mode | default('disabled')) == 'disabled'
-            become: true
-            become_user: "{{ rdbms_service_user.name }}"
-            tags: fsfo
-
-          - name: (main) Configure FSFO
-            include: set-fsfo.yml
-            when: ( hostvars[groups[ primary ][0]]['fsfo_mode']    | default('disabled')) != 'disabled'
-            become: true
-            become_user: "{{ rdbms_service_user.name }}"
-            tags: fsfo
-
-        when: not post_restore and not update_ssm_parameter_restore 
+    - name: (main) Setup taf service name
+      include: set-taf-service.yml
 
   when: 
      - not fsfo_setup
      - not password_rotation
+     - not update_ssm_parameter_restore
+
+- block:
+
+    - name: (main) Remove FSFO
+      include: unset-fsfo.yml
+      when: ( fsfo_mode | default('disabled')) == 'disabled'
+      become: true
+      become_user: "{{ rdbms_service_user.name }}"
+      tags: fsfo
+
+    - name: (main) Configure FSFO
+      include: set-fsfo.yml
+      when: ( hostvars[groups[ primary ][0]]['fsfo_mode']   | default('disabled')) != 'disabled'
+      become: true
+      become_user: "{{ rdbms_service_user.name }}"
+      tags: fsfo
+
+  when: 
+    - not update_ssm_parameter_restore
