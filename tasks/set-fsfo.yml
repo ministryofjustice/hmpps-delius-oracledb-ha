@@ -145,6 +145,8 @@
   shell: . /etc/environment && aws ssm get-parameters --region ${REGION} --with-decryption --name /${HMPPS_ENVIRONMENT}/${APPLICATION}/${HMPPS_ROLE}-database/db/oradb_sys_password | jq -r '.Parameters[].Value'
   register: get_sys_password
   changed_when: false
+  vars:
+     ansible_aws_ssm_timeout: 60
 
 - name: Initialize List of Data Guard Credentials
   set_fact:
@@ -198,6 +200,8 @@
          hostname
   register: get_hostname
   changed_when: false
+  vars:
+     ansible_aws_ssm_timeout: 60
 
 - name: Set Hostname
   set_fact:
@@ -259,6 +263,8 @@
         . oraenv
         crsctl modify resource {{ observer_resource }} -attr "ENABLED=0"
   when: get_crs_resource.stdout is search('.*CRS-2613.*') or not "ENABLED=0" in get_crs_resource.stdout_lines
+  vars:
+     ansible_aws_ssm_timeout: 60
 
 # Setup steps only - do not change FSFO configuration during password rotation
 - name: Steps on Primary Only
