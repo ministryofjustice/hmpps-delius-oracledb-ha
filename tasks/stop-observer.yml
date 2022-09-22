@@ -1,5 +1,15 @@
 # Whilst we are working on configuring / resetting the Observers we want to temporarily remove them from the control of CRS
 # so that it does not attempt to restart the resources at a time not of our choosing
+- name: Check if CRS Resource Already Exists
+  shell: |
+        . ~/.bash_profile
+        export ORACLE_SID=+ASM
+        export ORAENV_ASK=NO
+        . oraenv
+        crsctl status resource {{ observer_resource }} -p
+  changed_when: false
+  register: get_crs_resource
+
 - name: Disable CRS Resource for Observer
   shell: |
         . ~/.bash_profile
