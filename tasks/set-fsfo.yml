@@ -211,6 +211,27 @@
   set_fact:
       observer_resource: "dg.observer"
 
+# Do not repeat CRS setup if rotating passwords as we assume this has already been done
+- name: Setup CRS
+  when: not password_rotation
+  block:
+
+      - name: Install CRS Resource Action Script to Control the Observer
+        copy:
+          src: observer.sh
+          dest: "{{ observer_config_dir }}/observer.sh"
+          mode: u+rwx
+        
+      - name: Install CRS Resource Attributes for Observer
+        template:
+          src: observer.config.j2
+          dest: "{{ observer_config_dir }}/observer.config"
+        vars:
+          observer_script: "{{ observer_config_dir }}/observer.sh"
+          ec2_hostname: "{{ my_hostname }}"
+          db_service: "{{ database_primary_sid | default(database_standby_sid) | lower }}"
+          ansible_aws_ssm_timeout: 60
+
 - name: Check if CRS Resource Already Exists
   shell: |
         . ~/.bash_profile
@@ -235,29 +256,6 @@
 # Ensure all Observers are Currently Stopped and FSFO Disabled whilst changes in progress
 - name: Disable FSFO and Stop Observers
   include: stop-observer.yml
-
-# Do not repeat CRS setup if rotating passwords as we assume this has already been done
-- name: Setup CRS
-  when: not password_rotation
-  block:
-
-      - name: Install CRS Resource Action Script to Control the Observer
-        copy:
-          src: observer.sh
-          dest: "{{ observer_config_dir }}/observer.sh"
-          mode: u+rwx
-        
-      - name: Install CRS Resource Attributes for Observer
-        template:
-          src: observer.config.j2
-          dest: "{{ observer_config_dir }}/observer.config"
-        vars:
-          observer_script: "{{ observer_config_dir }}/observer.sh"
-          ec2_hostname: "{{ my_hostname }}"
-          db_service: "{{ database_primary_sid | default(database_standby_sid) | lower }}"
-          ansible_aws_ssm_timeout: 60
-
-
 
 # Setup steps only - do not change FSFO configuration during password rotation
 - name: Steps on Primary Only
