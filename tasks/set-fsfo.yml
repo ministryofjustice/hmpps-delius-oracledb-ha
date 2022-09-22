@@ -446,15 +446,20 @@
         delegate_to:  "{{ hostvars[groups[ standby2 ][0]]['inventory_hostname'] }}"
 
 # Disable Fast Start Failover before stopping Observers to prevent a failover attempt
+# (We can skip this for password rotation as it will have already been done by the Rotation task)
 - name: Disable Fast Start Failover
   shell: |
       . ~/.bash_profile
       dgmgrl / "disable fast_start failover;"
-  when: inventory_hostname == groups[ primary ][0]
+  when:
+     - inventory_hostname == groups[ primary ][0]
+     - not password_rotation
+  vars:
+          ansible_aws_ssm_timeout: 60
 
 # Stop all the Observers on this host to allow it to restart with the new password
 # Note that the stopping of Observers can take a long time to complete
-- name: Stop Observers if Password Changed
+- name: Stop Observers to Allow Restart
   shell: |
          . ~/.bash_profile
          {{ observer_config_dir }}/observer.sh stop
