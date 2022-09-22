@@ -263,8 +263,6 @@
         . oraenv
         crsctl modify resource {{ observer_resource }} -attr "ENABLED=0"
   when: get_crs_resource.stdout is search('.*CRS-2613.*') or not "ENABLED=0" in get_crs_resource.stdout_lines
-  vars:
-     ansible_aws_ssm_timeout: 60
 
 # Setup steps only - do not change FSFO configuration during password rotation
 - name: Steps on Primary Only
