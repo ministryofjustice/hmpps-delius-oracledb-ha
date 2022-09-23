@@ -30,9 +30,11 @@
   register: get_crs_resource_status
 
 # Ensure the SYS account is unlocked (it may have become locked due to failed logins using the old password)
+# Can only unlock from primary
 - name: Unlock SYS Account
   script: unlock_sys_password.sh
   register: unlock_sys_account
+  when: inventory_hostname in groups[ primary ]
 
 - name: Start Offline CRS Resource
   shell: |
