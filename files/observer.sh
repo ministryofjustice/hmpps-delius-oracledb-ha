@@ -246,18 +246,18 @@ function stop_defunct_observer()
 # It is possible that up to 3 observers may run on a single node
 # This is not desired and any defunct observers no longer
 # able to communicate with the primary and target databases should be stopped
-BACKUP_OBSERVER_COUNT=$(dgmgrl -silent / "show observer" | grep -A2 $(hostname) | grep -c -- "- Backup")
-MASTER_OBSERVER_COUNT=$(dgmgrl -silent / "show observer" | grep -A2 $(hostname) | grep -c -- "- Master")
+BACKUP_OBSERVER_COUNT=$(dgmgrl -silent / "show observer" | grep -A2 -E -e "$(hostname)\"" | grep -c -- "- Backup")
+MASTER_OBSERVER_COUNT=$(dgmgrl -silent / "show observer" | grep -A2 -E -e "$(hostname)\"" | grep -c -- "- Master")
 if [[ $BACKUP_OBSERVER_COUNT -eq 1 && $MASTER_OBSERVER_COUNT -eq 1 ]]
 then  
    # Stop Backup Observer as Master is running on this Host
-    DEFUNCT_OBSERVER_NAME=$(dgmgrl -silent / "show observer" | grep -A3 $(hostname) | grep -- "- Backup" | awk '{print $2}')
+    DEFUNCT_OBSERVER_NAME=$(dgmgrl -silent / "show observer" | grep -A3 -E -e "$(hostname)\"" | grep -- "- Backup" | awk '{print $2}')
     stop_observer ${DEFUNCT_OBSERVER_NAME}
 fi
 if [[ $BACKUP_OBSERVER_COUNT -gt 1 ]]
 then
    # More than one Backup observer found. Find and stop the defunct one.
-   DEFUNCT_OBSERVER=$(dgmgrl -silent / "show observer" | grep -A3 $(hostname) | grep -A4 -- "- Backup" | awk '/Observer/{OBSERVER=$2}/(unknown)/{print OBSERVER}' | uniq -c)
+   DEFUNCT_OBSERVER=$(dgmgrl -silent / "show observer" | grep -A3 -E -e "$(hostname)\"" | grep -A4 -- "- Backup" | awk '/Observer/{OBSERVER=$2}/(unknown)/{print OBSERVER}' | uniq -c)
    DEFUNCT_PING_COUNT=$(echo $DEFUNCT_OBSERVER | awk '{print $1}')
    DEFUNCT_OBSERVER_NAME=$(echo $DEFUNCT_OBSERVER | awk '{print $2}')
    if [[ ${DEFUNCT_PING_COUNT} -eq 1 && ! -z ${DEFUNCT_OBSERVER_NAME} ]];
@@ -266,7 +266,7 @@ then
       stop_observer ${DEFUNCT_OBSERVER_NAME}
    else
       # Both observers have valid Ping Times - Stop the one with the Longest Aggregate (Primary+Target) Ping Time
-      LONGEST_PING=$(dgmgrl -silent / "show observer" | grep -A3 $(hostname) | grep -A4 -- "- Backup" | awk 'BEGIN{SUM=0}/Observer/{OBSERVER=$2}/Last Ping/{SUM+=$5}/--/{print SUM,OBSERVER; SUM=0}END{print SUM,OBSERVER}' | sort -n -k1 | tail -1)
+      LONGEST_PING=$(dgmgrl -silent / "show observer" | grep -A3 -E -e "$(hostname)\"" | grep -A4 -- "- Backup" | awk 'BEGIN{SUM=0}/Observer/{OBSERVER=$2}/Last Ping/{SUM+=$5}/--/{print SUM,OBSERVER; SUM=0}END{print SUM,OBSERVER}' | sort -n -k1 | tail -1)
       DEFUNCT_OBSERVER_NAME=$(echo $LONGEST_PING | awk '{print $2}')
       stop_observer ${DEFUNCT_OBSERVER_NAME}
    fi
