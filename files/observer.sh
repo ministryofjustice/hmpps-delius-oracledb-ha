@@ -280,6 +280,12 @@ EXISTING_OBSERVER_ERROR=$(check_observer)
 # An non-zero code will be returned if there is no existing observer or it has errors.   In this case start an Observer.
 if [[ "${EXISTING_OBSERVER_ERROR}" -gt 0 ]];
 then
+      # Stop any existing Observers on this host as they are in an error state
+      # and we want them to be restarted
+      for BAD_OBSERVER in $(get_observers)
+      do
+         stop_named_observer "${BAD_OBSERVER}"
+      done
       THIS_CWCN=$(get_cwcn)
       # Check Data Guard does not have any errors before attempting to start
       # the Observer
