@@ -1,0 +1,51 @@
+# Now we have completed the set-up of the Observers (or Password Change) we can allow CRS to start managing their availability again.
+# (This is required to ensure that Observers are restarted if the server is rebooted)
+- name: Check if CRS Resource is Still Disabled
+  shell: |
+        . ~/.bash_profile
+        export ORACLE_SID=+ASM
+        export ORAENV_ASK=NO
+        . oraenv
+        crsctl status resource {{ observer_resource }} -p
+  changed_when: false
+  register: get_crs_resource
+
+- name: Re-Enable CRS Resource for Observer
+  shell: |
+        . ~/.bash_profile
+        export ORACLE_SID=+ASM
+        export ORAENV_ASK=NO
+        . oraenv
+        crsctl modify resource {{ observer_resource }} -attr "ENABLED=1"
+  when: not "ENABLED=1" in get_crs_resource.stdout_lines
+  
+- name: Check if CRS Resource is Running
+  shell: |
+        . ~/.bash_profile
+        export ORACLE_SID=+ASM
+        export ORAENV_ASK=NO
+        . oraenv
+        crsctl status resource {{ observer_resource }}
+  changed_when: false
+  register: get_crs_resource_status
+
+# Ensure the SYS account is unlocked (it may have become locked due to failed logins using the old password)
+# Can only unlock from primary
+- name: Unlock SYS Account
+  script: unlock_sys_password.sh
+  register: unlock_sys_account
+  when: inventory_hostname in groups[ primary ]
+
+- name: Start Offline CRS Resource
+  shell: |
+         . ~/.bash_profile
+         export ORACLE_SID=+ASM
+         export ORAENV_ASK=NO
+         . oraenv
+         crsctl start res dg.observer
+  when: get_crs_resource_status.stdout is search('.*STATE=OFFLINE.*')
+  register: start_observer
+  retries: 3
+  delay: 400
+  until: start_observer is not failed or start_observer.stdout is search('.*CRS-5702.*')
+  failed_when: start_observer.rc !=0 and not start_observer.stdout is search('.*CRS-5702.*') 

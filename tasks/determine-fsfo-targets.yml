@@ -5,6 +5,8 @@
   register: get_databases_in_configuration
   delegate_to: "{{ delegation_host }}"
   changed_when: false
+  vars:
+      ansible_aws_ssm_timeout: 60
 
 # List Index 0=Primary 1=1st Standby 2=2nd Standby
 - name: Populate List of Databases in Configuration

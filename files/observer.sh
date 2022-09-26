@@ -117,10 +117,12 @@ function set_master_observer()
 {
 ACTIVE_TARGET_SID=$(get_active_target_db | tr 'a-z' 'A-Z')
 LOCAL_SID=$(echo $ORACLE_SID | tr 'a-z' 'A-Z')
+# If the target Database is running on this Host, make this the Master Observer
 if [[ ! -z "${ACTIVE_TARGET_SID}"
      && "${ACTIVE_TARGET_SID}" == "${LOCAL_SID}" ]];
 then
-   THIS_OBSERVER=$(get_observer)
+   # Set Any Observer on this Host to be the Master (Arbitrarily the First)
+   THIS_OBSERVER=$(get_observers | awk '{print $1}')
    THIS_OBSERVER_TYPE=$(get_observer_type ${THIS_OBSERVER})
    if [[ "${THIS_OBSERVER_TYPE}" == "Backup" ]];
    then
@@ -185,11 +187,15 @@ done
 
 function relocate_master_observer()
 {
-for OBSERVER_HOST in $(get_backup_observer_hosts);
+# Try relocating master observer to one of the other hosts until it succeeds
+for OBSERVER_HOST in $(get_backup_observer_hosts)
 do
-   set_master_observer_host ${OBSERVER_HOST}
-   [[ $? == 0 ]] && break
-   echo "Relocation failed"
+   if [[ "$HOSTNAME" != "${OBSERVER_HOST}" ]]
+   then
+      set_master_observer_host ${OBSERVER_HOST}
+      [[ $? == 0 ]] && break
+      echo "Relocation failed"
+   fi
 done  
 poll_for_master_observer_host "${OBSERVER_HOST}" 
 } 
@@ -201,11 +207,12 @@ OBSERVER=$1
 echo -e "${CONFIG}\nshow observers;"  | dgmgrl -silent / | grep -E "${OBSERVER}" | awk '{print $NF}'
 }
 
-function get_observer()
+function get_observers()
 {
-# Observer name may under certain conditions be suffixed with the version in parenthesis - this information should be excluded
+# Return tab delimited list of the names of all Observers running on this host (normally expect 0 or 1, but there can be up to 3).
+# Observer name may under certain conditions (such as during patching) be suffixed with the version in parenthesis - this information should be excluded
 # Note that the case of the hostname within the Observer name may change from that which was specified, so use case insensitive search
-echo -e "${CONFIG}\nshow observers;"  | dgmgrl -silent / | grep -E -B3 "Host Name:\\s+$(hostname)$" | grep -i "Observer \"$(hostname)" | awk '{print $2}' | awk -F \( '{print $1}'
+dgmgrl -silent / "show observer;" | grep -E -B3 "Host Name:\\s+$(hostname)$" | grep -i "Observer \"$(hostname)" | awk '{print $2}' | awk -F \( '{print $1}' | paste - -
 }
 
 function get_cwcn()
@@ -234,26 +241,73 @@ do
 done
 }
 
+function stop_defunct_observer()
+{
+# It is possible that up to 3 observers may run on a single node
+# This is not desired and any defunct observers no longer
+# able to communicate with the primary and target databases should be stopped
+BACKUP_OBSERVER_COUNT=$(dgmgrl -silent / "show observer" | grep -A2 -E -e "$(hostname)\"" | grep -c -- "- Backup")
+MASTER_OBSERVER_COUNT=$(dgmgrl -silent / "show observer" | grep -A2 -E -e "$(hostname)\"" | grep -c -- "- Master")
+if [[ $BACKUP_OBSERVER_COUNT -eq 1 && $MASTER_OBSERVER_COUNT -eq 1 ]]
+then  
+   # Stop Backup Observer as Master is running on this Host
+    DEFUNCT_OBSERVER_NAME=$(dgmgrl -silent / "show observer" | grep -A3 -E -e "$(hostname)\"" | grep -- "- Backup" | awk '{print $2}')
+    stop_observer ${DEFUNCT_OBSERVER_NAME}
+fi
+if [[ $BACKUP_OBSERVER_COUNT -gt 1 ]]
+then
+   # More than one Backup observer found. Find and stop the defunct one.
+   DEFUNCT_OBSERVER=$(dgmgrl -silent / "show observer" | grep -A3 -E -e "$(hostname)\"" | grep -A4 -- "- Backup" | awk '/Observer/{OBSERVER=$2}/(unknown)/{print OBSERVER}' | uniq -c)
+   DEFUNCT_PING_COUNT=$(echo $DEFUNCT_OBSERVER | awk '{print $1}')
+   DEFUNCT_OBSERVER_NAME=$(echo $DEFUNCT_OBSERVER | awk '{print $2}')
+   if [[ ${DEFUNCT_PING_COUNT} -eq 1 && ! -z ${DEFUNCT_OBSERVER_NAME} ]];
+   then
+      # Stop observer with Unknown Ping Times
+      stop_observer ${DEFUNCT_OBSERVER_NAME}
+   else
+      # Both observers have valid Ping Times - Stop the one with the Longest Aggregate (Primary+Target) Ping Time
+      LONGEST_PING=$(dgmgrl -silent / "show observer" | grep -A3 -E -e "$(hostname)\"" | grep -A4 -- "- Backup" | awk 'BEGIN{SUM=0}/Observer/{OBSERVER=$2}/Last Ping/{SUM+=$5}/--/{print SUM,OBSERVER; SUM=0}END{print SUM,OBSERVER}' | sort -n -k1 | tail -1)
+      DEFUNCT_OBSERVER_NAME=$(echo $LONGEST_PING | awk '{print $2}')
+      stop_observer ${DEFUNCT_OBSERVER_NAME}
+   fi
+fi
+}
+
+
 function start_observer()
 {
-THIS_CWCN=$(get_cwcn)
-# Check Data Guard does not have any errors before attempting to start
-# the Observer
-check_data_guard
-# As of Oracle 19.16 the Observer will start with "noname" by default, which prevents multiple Observers starting
-# as they will all have the same name.  As a workaround use the hostname suffixed by 1 which replicates the
-# behaviour of earlier versions.
-echo -e "${CONFIG}\nconnect /\nstart observer \"$(hostname)1\" in background file is ${ORACLE_BASE}/dg_observer/fsfo.dat logfile is ${ORACLE_BASE}/dg_observer/observer.log connect identifier is ${THIS_CWCN};" | dgmgrl -silent
-poll_for_observer
-echo
-# Check the Active Target database is set to the preferred database
-set_preferred_active_target_database
-poll_for_observer
-# Check if this is the intended site for the master observer 
-# and change the type of the observer if it is not currently so
-set_master_observer
-poll_for_observer
-echo
+EXISTING_OBSERVER_ERROR=$(check_observer)
+# An non-zero code will be returned if there is no existing observer or it has errors.   In this case start an Observer.
+if [[ "${EXISTING_OBSERVER_ERROR}" -gt 0 ]];
+then
+      # Stop any existing Observers on this host as they are in an error state
+      # and we want them to be restarted
+      for BAD_OBSERVER in $(get_observers)
+      do
+         stop_named_observer "${BAD_OBSERVER}"
+      done
+      THIS_CWCN=$(get_cwcn)
+      # Check Data Guard does not have any errors before attempting to start
+      # the Observer
+      check_data_guard
+      # As of Oracle 19.16 the Observer will start with "noname" by default, which prevents multiple Observers starting
+      # as they will all have the same name.  As a workaround use the hostname suffixed by 1 which replicates the
+      # behaviour of earlier versions.
+      echo -e "${CONFIG}\nconnect /\nstart observer \"$(hostname)1\" in background file is ${ORACLE_BASE}/dg_observer/fsfo.dat logfile is ${ORACLE_BASE}/dg_observer/observer.log connect identifier is ${THIS_CWCN};" | dgmgrl -silent
+      poll_for_observer
+      echo
+      # Check the Active Target database is set to the preferred database
+      set_preferred_active_target_database
+      # Check for defunct Observers on this host and stop them
+      stop_defunct_observer
+      echo
+      # Check if this is the intended site for the master observer 
+      # and change the type of the observer if it is not currently so
+      set_master_observer
+      echo
+else
+    echo "Observer already started"
+fi
 RC=$(check_observer)
 }
 
@@ -290,49 +344,62 @@ exit 1
 
 function stop_observer()
 {
-THIS_OBSERVER=$(get_observer)
-THIS_OBSERVER_TYPE=$(get_observer_type ${THIS_OBSERVER})
-# If stopping the Master Observer, if any Backup Observers exist then
-# one of these must be converted to the Master first 
-if [[ "${THIS_OBSERVER_TYPE}" == "Master" ]];
-then
-   BACKUP_COUNT=$(count_backup_observers)
-   if [[ ${BACKUP_COUNT} -gt 0 ]];
-   then
-      echo "Converting to Backup Observer"
-      relocate_master_observer
+# Stop all Observers running on this host
+for THIS_OBSERVER in $(get_observers)
+do
       THIS_OBSERVER_TYPE=$(get_observer_type ${THIS_OBSERVER})
+      # If stopping the Master Observer, if any Backup Observers exist then
+      # one of these must be converted to the Master first 
       if [[ "${THIS_OBSERVER_TYPE}" == "Master" ]];
       then
+         BACKUP_COUNT=$(count_backup_observers)
          if [[ ${BACKUP_COUNT} -gt 0 ]];
          then
-            echo "Cannot Stop Master Observer as Backup Observers Still Exist"
-            exit 1
+            echo "Converting to Backup Observer"
+            relocate_master_observer
+            THIS_OBSERVER_TYPE=$(get_observer_type ${THIS_OBSERVER})
+            if [[ "${THIS_OBSERVER_TYPE}" == "Master" ]];
+            then
+               if [[ ${BACKUP_COUNT} -gt 0 ]];
+               then
+                  echo "Cannot Stop Master Observer as Backup Observers Still Exist"
+                  exit 1
+               fi
+            fi
+         else
+            echo "No Backup Observers - Stopping Master"
          fi
       fi
-   else
-      echo "No Backup Observers - Stopping Master"
-   fi
-fi
-if [[ ! -z ${THIS_OBSERVER} ]];
-then
-   stop_named_observer ${THIS_OBSERVER}
-fi
+      if [[ ! -z ${THIS_OBSERVER} ]];
+      then
+         stop_named_observer ${THIS_OBSERVER}
+      fi
+done
 }
 
 function check_observer()
 {
-THIS_OBSERVER=$(get_observer)
+# Return success code 0 if an observer is running with a sensible ping time (less than 100 seconds)
+ALL_OBSERVERS=$(get_observers)
 # Return error code if no observer found on this host
-if [[ -z "${THIS_OBSERVER}" ]];
+if [[ -z "${ALL_OBSERVERS}" ]];
 then
    echo 1
 else
 # When we check the observer we expect to find two 1 or 2 digit numbers
 # corresponding to the Ping Times to Primary and Standby.
 # Anything else is considered to be an error.
+for THIS_OBSERVER in $(echo ${ALL_OBSERVERS})
+do
+   # Loop through all the Observers (normally there will just be one).   Only one needs to be operation to return a success code.
    echo -e "${CONFIG}\nshow observers;"  | dgmgrl -silent / | grep -A4 "Observer ${THIS_OBSERVER}" | grep "Last Ping to" | awk '{print $5}' | grep -c -E "^[[:digit:]]{1,2}$" | grep -q 2
-   echo $?
+   if [[ $? -eq 0 ]];
+   then
+      echo 0
+      return
+   fi
+done
+echo 1
 fi
 }
 

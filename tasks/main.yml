@@ -7,6 +7,7 @@
     update_ssm_parameter_restore: false
     post_restore: false
     fsfo_setup: false
+    password_rotation: false
 
 - name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
   set_fact:
@@ -29,6 +30,11 @@
     fsfo_setup: true
   when:  method is defined and method == "fsfo setup"
 
+- name: (main) Set fact to only carry out steps needed for password rotation
+  set_fact:
+    password_rotation: true
+  when:  method is defined and method == "password rotation"
+
 - name: (main/set-primary-config) Gather facts with dns filter
   setup:
     filter: ansible_dns
@@ -47,11 +53,13 @@
   when: high_availability_count | int > 1
   tags: var
 
-# The following variable is not required if we are only running FSFO Setup (system-wide configuration - not specific to one standby database)
+# The following variable is not required if we are only running FSFO Setup or Password Rotation (system-wide configuration - not specific to one standby database)
 - name: (main/set-primary-config) Handle if using tag InventoryHost as the inventory hostname
   set_fact:
     standby_host_tns: "{{ standby_host | regex_replace('([^\\.]*).*$' ,'\\1') | regex_replace('^(.+)-((delius|mis|misboe|misdsd)-db-(1|2|3))$','\\2') }}.{{ simple_environment_name }}.{{ project_name }}.{{ ansible_dns.search[0] }}"
-  when: not fsfo_setup
+  when: 
+     - not fsfo_setup
+     - not password_rotation
   tags: var
 
 - name: (main) Set up oracle specific variables
@@ -60,55 +68,23 @@
       register: grid_home
       shell: "grep +ASM /etc/oratab | cut -d: -f2"
       changed_when: false
+      vars:
+         ansible_aws_ssm_timeout: 60
+      
     - name: (main) Set up oracle database home
       register: oracle_home
       shell: "grep {{ database_primary_sid_name}} /etc/oratab | cut -d: -f2"
       run_once: True
       changed_when: false
+      vars:
+         ansible_aws_ssm_timeout: 60
+
     - set_fact:
         oracle_database_oracle_home: "{{ oracle_home.stdout }}"
         oracle_grid_oracle_home: "{{ grid_home.stdout }}"
   tags: var
 
-- block:
-
-    # When considering if FSFO Setup should be run we only consider the setting on the primary database server.
-    # However the same setting must apply by design to each of the standby databases (whether explicitly defined or not)
-    - name: (main) Configure FSFO
-      include: set-fsfo.yml
-      when: ( hostvars[groups[ primary ][0]]['fsfo_mode']    | default('disabled')) != 'disabled'
-      become: true
-      become_user: "{{ rdbms_service_user.name }}"
-      tags: fsfo
-
-  when: fsfo_setup
-
-- block:
-    - name: (main) Configure Oracle data guard broker
-      include: set-primary-dgbroker.yml
-      when: inventory_hostname in groups[ primary ]
-
-    - name: (main) Setup taf service name
-      include: set-taf-service.yml
-
-    - name: (main) Remove FSFO
-      include: unset-fsfo.yml
-      when: ( fsfo_mode | default('disabled')) == 'disabled'
-      become: true
-      become_user: "{{ rdbms_service_user.name }}"
-      tags: fsfo
-
-    - name: (main) Configure FSFO
-      include: set-fsfo.yml
-      when: ( hostvars[groups[ primary ][0]]['fsfo_mode']   | default('disabled')) != 'disabled'
-      become: true
-      become_user: "{{ rdbms_service_user.name }}"
-      tags: fsfo
-
-    - meta: end_play
-  when: post_restore
-
-# Provided we are not running FSFO Set-Up, run all of the following block
+# Provided we are not running FSFO Set-Up or Password Rotation, run all of the following block
 # to build the HA
 - block:
 
@@ -176,32 +152,40 @@
         include: restore-primary-to-standby.yml
         tags: restore
 
-        when: not fsfo_setup
+  when: 
+     - not post_restore
+     - not fsfo_setup
+     - not password_rotation
 
-      - block:
-          - name: (main) Configure Oracle data guard broker
-            include: set-primary-dgbroker.yml
-            when: inventory_hostname in groups[ primary ]
-            tags: dg
+- block:
 
-          - name: (main) Setup taf service name
-            include: set-taf-service.yml
-            tags: taf
+    - name: (main) Configure Oracle data guard broker
+      include: set-primary-dgbroker.yml
+      when: inventory_hostname in groups[ primary ]
 
-          - name: (main) Remove FSFO
-            include: unset-fsfo.yml
-            when: ( fsfo_mode | default('disabled')) == 'disabled'
-            become: true
-            become_user: "{{ rdbms_service_user.name }}"
-            tags: fsfo
+    - name: (main) Setup taf service name
+      include: set-taf-service.yml
 
-          - name: (main) Configure FSFO
-            include: set-fsfo.yml
-            when: ( hostvars[groups[ primary ][0]]['fsfo_mode']    | default('disabled')) != 'disabled'
-            become: true
-            become_user: "{{ rdbms_service_user.name }}"
-            tags: fsfo
+  when: 
+     - not fsfo_setup
+     - not password_rotation
+     - not update_ssm_parameter_restore
 
-        when: not post_restore and not update_ssm_parameter_restore 
+- block:
 
-  when: not fsfo_setup
+    - name: (main) Remove FSFO
+      include: unset-fsfo.yml
+      when: ( fsfo_mode | default('disabled')) == 'disabled'
+      become: true
+      become_user: "{{ rdbms_service_user.name }}"
+      tags: fsfo
+
+    - name: (main) Configure FSFO
+      include: set-fsfo.yml
+      when: ( hostvars[groups[ primary ][0]]['fsfo_mode']   | default('disabled')) != 'disabled'
+      become: true
+      become_user: "{{ rdbms_service_user.name }}"
+      tags: fsfo
+
+  when: 
+    - not update_ssm_parameter_restore
