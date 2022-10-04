@@ -145,6 +145,7 @@
   shell: . /etc/environment && aws ssm get-parameters --region ${REGION} --with-decryption --name /${HMPPS_ENVIRONMENT}/${APPLICATION}/${HMPPS_ROLE}-database/db/oradb_sys_password | jq -r '.Parameters[].Value'
   register: get_sys_password
   changed_when: false
+  no_log: true
   vars:
      ansible_aws_ssm_timeout: 60
 
