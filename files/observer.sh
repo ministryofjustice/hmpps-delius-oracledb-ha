@@ -45,7 +45,14 @@ echo
 
 function get_active_target_db()
 {
-echo -e "${CONFIG}\nshow observers;" | dgmgrl -silent / | awk '/Active Target:/{print $NF}'
+# Active standby database is preceeded by a *
+dgmgrl / "show configuration;" | grep -- "- (\*) Physical standby database" | awk '{print $1}'
+}
+
+function get_non_active_target_db()
+{
+# Any other standby database is not preceeded by a *
+dgmgrl / "show configuration;" | grep -- "- Physical standby database" | awk '{print $1}'
 }
 
 function get_preferred_active_target_database()
@@ -113,23 +120,39 @@ fi
 }
 
 
+function assume_master_observer_role()
+{
+# Set Any Observer on this Host to be the Master (Arbitrarily the First)
+THIS_OBSERVER=$(get_observers | awk '{print $1}')
+THIS_OBSERVER_TYPE=$(get_observer_type ${THIS_OBSERVER})
+if [[ "${THIS_OBSERVER_TYPE}" == "Backup" ]];
+then
+   HOSTNAME=$(hostname)
+   echo "Becoming Master Observer"
+   set_master_observer_host ${HOSTNAME}
+fi
+}
+
+
 function set_master_observer()
 {
 ACTIVE_TARGET_SID=$(get_active_target_db | tr 'a-z' 'A-Z')
+NON_ACTIVE_TARGET_SID=$(get_non_active_target_db | tr 'a-z' 'A-Z')
 LOCAL_SID=$(echo $ORACLE_SID | tr 'a-z' 'A-Z')
-# If the target Database is running on this Host, make this the Master Observer
-if [[ ! -z "${ACTIVE_TARGET_SID}"
+# If the Non-Active Target Database is running on this Host, make this the Master Observer
+# i.e. Run the Master Observer on 3rd site which is neither Primary nor Standby
+# (This is recommended practice)
+if [[ ! -z "${NON_ACTIVE_TARGET_SID}"
+     && "${NON_ACTIVE_TARGET_SID}" == "${LOCAL_SID}" ]];
+then
+   assume_master_observer_role
+# If there is no Non-Active Target Database (i.e. there is only one standby),
+# then use the Standby site as master
+elif [[ ! -z "${ACTIVE_TARGET_SID}"
+     &&   -z "${NON_ACTIVE_TARGET_SID}"
      && "${ACTIVE_TARGET_SID}" == "${LOCAL_SID}" ]];
 then
-   # Set Any Observer on this Host to be the Master (Arbitrarily the First)
-   THIS_OBSERVER=$(get_observers | awk '{print $1}')
-   THIS_OBSERVER_TYPE=$(get_observer_type ${THIS_OBSERVER})
-   if [[ "${THIS_OBSERVER_TYPE}" == "Backup" ]];
-   then
-     HOSTNAME=$(hostname)
-     echo "Becoming Master Observer"
-     set_master_observer_host ${HOSTNAME}
-   fi
+   assume_master_observer_role
 fi
 }
 
@@ -377,8 +400,25 @@ do
 done
 }
 
+function get_fast_start_failover()
+{
+# Get whether FSFO is Enabled (Enabled and Observe-Only are treated as equivalent)
+dgmgrl / "show configuration" | awk '/Fast-Start Failover:/{print $3}'
+}
+
+
 function check_observer()
 {
+# Check if FSFO is Enabled
+FSFO_STATUS=$(get_fast_start_failover)
+if [[ "${FSFO_STATUS}" == "Disabled" ]];
+then
+   # If FSFO is Disabled then the Observer will only be pinging the Primary  
+   PING_TARGETS=1
+else  
+   # If FSFO is Enabled then the Observer will ping both Primary and Active Target
+   PING_TARGETS=2
+fi
 # Return success code 0 if an observer is running with a sensible ping time (less than 100 seconds)
 ALL_OBSERVERS=$(get_observers)
 # Return error code if no observer found on this host
@@ -387,12 +427,13 @@ then
    echo 1
 else
 # When we check the observer we expect to find two 1 or 2 digit numbers
-# corresponding to the Ping Times to Primary and Standby.
+# corresponding to the Ping Times to Primary (and Active Target Standby if FSFO Enabled).
 # Anything else is considered to be an error.
 for THIS_OBSERVER in $(echo ${ALL_OBSERVERS})
 do
+   sleep 1
    # Loop through all the Observers (normally there will just be one).   Only one needs to be operation to return a success code.
-   echo -e "${CONFIG}\nshow observers;"  | dgmgrl -silent / | grep -A4 "Observer ${THIS_OBSERVER}" | grep "Last Ping to" | awk '{print $5}' | grep -c -E "^[[:digit:]]{1,2}$" | grep -q 2
+   echo -e "${CONFIG}\nshow observers;"  | dgmgrl -silent / | grep -A4 "Observer ${THIS_OBSERVER}" | grep "Last Ping to" | awk '{print $5}' | grep -c -E "^[[:digit:]]{1,2}$" | grep -q ${PING_TARGETS}
    if [[ $? -eq 0 ]];
    then
       echo 0
