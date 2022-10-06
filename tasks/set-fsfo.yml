@@ -1,6 +1,7 @@
 - name: Steps on Primary Only
-  delegate_to: "{{ groups[ primary ][0] }}"
-  run_once: true
+  when: 
+     - inventory_hostname == groups[ primary ][0]
+     - not password_rotation
   block:
 
       - name: Get Configuration Name
@@ -13,6 +14,16 @@
       - name: Set Configuration Name
         set_fact:
             configuration_name: "{{ get_ConfigurationName.stdout | trim }}"
+
+- name: Share Configuration Name with all Hosts
+  set_fact:
+     configuration_name: "{{ hostvars[groups[primary][0]]['configuration_name'] }}"
+  when: not password_rotation
+
+- name: Steps on Primary Only
+  when: 
+     - inventory_hostname == groups[ primary ][0]
+  block:
 
       - name: Get Configuration-Wide Service Name
         shell: |
@@ -39,41 +50,15 @@
                     . ~/.bash_profile
                     dgmgrl  / "edit configuration set property ConfigurationWideServiceName='{{ configuration_wide_service_name }}'"
 
-- name: Add Optional HA1 TNS Address
+- name: Share Configuration Wide Service Name with all Hosts
   set_fact:
-     ha1_address: "(ADDRESS = (PROTOCOL = TCP)(HOST = {{ standby_host1_tns }})(PORT = 1521))"
-  when: (high_availability_count | int | default(0)) >= 1 
-
-- name: Add Optional HA2 TNS Address
-  set_fact:
-     ha2_address: "(ADDRESS = (PROTOCOL = TCP)(HOST = {{ standby_host2_tns }})(PORT = 1521))"
-  when: (high_availability_count | int | default(0)) == 2 
-
-- name: Add Configuration-Wide Service TNS Names Alias
-  blockinfile:
-    create: yes
-    path: '{{ oracle_database_oracle_home }}/network/admin/tnsnames.ora'  
-    block: |
-
-      {{ configuration_wide_service_name }} =
-      (DESCRIPTION =
-        (ADDRESS_LIST = 
-            (ADDRESS = (PROTOCOL = TCP)(HOST = {{ primary_host_tns }})(PORT = 1521)){{ ha1_address | default('') }}{{ ha2_address | default('') }})
-              (CONNECT_DATA =
-                (SERVER = DEDICATED) 
-                (SERVICE_NAME = {{ configuration_wide_service_name }})
-           )
-       )
-    owner: "{{ rdbms_service_user.name }}"
-    group: "{{ rdbms_service_user.group }}"
-    marker: "# {mark} ANSIBLE MANAGED BLOCK ADD CONFIGURATION-WIDE SERVICE NAME"
+     configuration_wide_service_name: "{{ hostvars[groups[primary][0]]['configuration_wide_service_name'] }}"
 
 - name: Get Oracle Base
   shell: |
     . ~/.bash_profile
     echo $ORACLE_BASE
   register: oracle_base_result
-  delegate_to: "{{ groups[ primary ][0] }}"
   run_once: true
   changed_when: false  
 
@@ -84,52 +69,85 @@
 - name: Define Location for Oracle Wallet
   set_fact:
     wallet_dir: "{{ oracle_base }}/wallets/dg_wallet"
-  
-- name: Create Wallet Directory
-  file: 
-    path: "{{ wallet_dir }}"
-    state: directory
 
-- name: Create Wallet if it does not already exist
-  shell: |
-        . ~/.bash_profile
-        orapki wallet create -wallet {{ wallet_dir }} -auto_login_only
-  args:
-    creates: "{{ wallet_dir }}/cwallet.sso"
-  register: orapki_out
+# We do not need to do the following if we are only rotating the password as we assume that FSFO has already been configured
+- name: Setup Connectivity
+  when: not password_rotation
+  block:
 
-- name: Check if the Configuration-Wide Service Name is Already in the Wallet
-  shell: |
-          . ~/.bash_profile
-          mkstore -wrl {{ wallet_dir }} -listCredential | grep -c ": {{ configuration_wide_service_name }} sys$" | cat
-  register: get_configuration_wide_service_name_in_wallet
-  changed_when: false
+      - name: Add Optional HA1 TNS Address
+        set_fact:
+          ha1_address: "(ADDRESS = (PROTOCOL = TCP)(HOST = {{ standby_host1_tns }})(PORT = 1521))"
+        when: (high_availability_count | int | default(0)) >= 1 
 
-- name: Add Wallet Location to SQLNET Config
-  blockinfile:
-    create: yes
-    path: '{{ oracle_database_oracle_home }}/network/admin/sqlnet.ora'  
-    block: |
+      - name: Add Optional HA2 TNS Address
+        set_fact:
+          ha2_address: "(ADDRESS = (PROTOCOL = TCP)(HOST = {{ standby_host2_tns }})(PORT = 1521))"
+        when: (high_availability_count | int | default(0)) == 2 
 
-      WALLET_LOCATION=(SOURCE=(METHOD=file)(METHOD_DATA=(DIRECTORY={{ wallet_dir }})))
-      SQLNET.WALLET_OVERRIDE=true
+      - name: Add Configuration-Wide Service TNS Names Alias
+        blockinfile:
+          create: yes
+          path: '{{ oracle_database_oracle_home }}/network/admin/tnsnames.ora'  
+          block: |
 
-    owner: "{{ rdbms_service_user.name }}"
-    group: "{{ rdbms_service_user.group }}"
-    marker: "# {mark} ANSIBLE MANAGED BLOCK ADD DATA GUARD WALLET"
+            {{ configuration_wide_service_name }} =
+            (DESCRIPTION =
+              (ADDRESS_LIST = 
+                  (ADDRESS = (PROTOCOL = TCP)(HOST = {{ primary_host_tns }})(PORT = 1521)){{ ha1_address | default('') }}{{ ha2_address | default('') }})
+                    (CONNECT_DATA =
+                      (SERVER = DEDICATED) 
+                      (SERVICE_NAME = {{ configuration_wide_service_name }})
+                )
+            )
+          owner: "{{ rdbms_service_user.name }}"
+          group: "{{ rdbms_service_user.group }}"
+          marker: "# {mark} ANSIBLE MANAGED BLOCK ADD CONFIGURATION-WIDE SERVICE NAME"
+        
+      - name: Create Wallet Directory
+        file: 
+          path: "{{ wallet_dir }}"
+          state: directory
 
-- name: If Credential Exists Check that it Works
-  shell: |
-          . ~/.bash_profile
-          echo exit | sqlplus -S -L /@{{ configuration_wide_service_name }} as sysdba
-  register: check_password
-  ignore_errors: True
-  when: ( get_configuration_wide_service_name_in_wallet.stdout | int ) > 0
+      - name: Create Wallet if it does not already exist
+        shell: |
+              . ~/.bash_profile
+              orapki wallet create -wallet {{ wallet_dir }} -auto_login_only
+        args:
+          creates: "{{ wallet_dir }}/cwallet.sso"
+        register: orapki_out
+
+      - name: Report Check
+        debug:
+            msg: "Checking if the credentials exist for {{ configuration_wide_service_name }} in the wallet"
+
+      - name: Check if the Configuration-Wide Service Name is Already in the Wallet
+        shell: |
+                . ~/.bash_profile
+                mkstore -wrl {{ wallet_dir }} -listCredential | grep -c ": {{ configuration_wide_service_name }} sys$" | cat
+        register: get_configuration_wide_service_name_in_wallet
+        changed_when: false
+
+      - name: Add Wallet Location to SQLNET Config
+        blockinfile:
+          create: yes
+          path: '{{ oracle_database_oracle_home }}/network/admin/sqlnet.ora'  
+          block: |
+
+            WALLET_LOCATION=(SOURCE=(METHOD=file)(METHOD_DATA=(DIRECTORY={{ wallet_dir }})))
+            SQLNET.WALLET_OVERRIDE=true
+
+          owner: "{{ rdbms_service_user.name }}"
+          group: "{{ rdbms_service_user.group }}"
+          marker: "# {mark} ANSIBLE MANAGED BLOCK ADD DATA GUARD WALLET"
 
 - name: Get sys password from ssm parameter store
   shell: . /etc/environment && aws ssm get-parameters --region ${REGION} --with-decryption --name /${HMPPS_ENVIRONMENT}/${APPLICATION}/${HMPPS_ROLE}-database/db/oradb_sys_password | jq -r '.Parameters[].Value'
   register: get_sys_password
   changed_when: false
+  no_log: true
+  vars:
+     ansible_aws_ssm_timeout: 60
 
 - name: Initialize List of Data Guard Credentials
   set_fact:
@@ -162,15 +180,20 @@
   set_fact:
       observer_config_dir: "{{ oracle_base }}/dg_observer"
 
-- name: Create Observer Configuration Directory
-  file:
-      path: "{{ observer_config_dir }}"
-      state: directory
+# Do not repeat Observer Config setup if rotating passwords as we assume this has already been done
+- name: Setup Observer Config
+  when: not password_rotation
+  block:
 
-- name: Install Observer Configuration File
-  template:
-    src: observer.j2
-    dest: "{{ observer_config_dir }}/observer.ora"
+      - name: Create Observer Configuration Directory
+        file:
+            path: "{{ observer_config_dir }}"
+            state: directory
+
+      - name: Install Observer Configuration File
+        template:
+          src: observer.j2
+          dest: "{{ observer_config_dir }}/observer.ora"
 
 # We require the hostname (EC2 Hostname) as supplied by the hostname command as this is what is used by the Data Guard Broker to identify hosts
 - name: Get Hostname
@@ -178,29 +201,37 @@
          hostname
   register: get_hostname
   changed_when: false
+  vars:
+     ansible_aws_ssm_timeout: 60
 
 - name: Set Hostname
   set_fact:
       my_hostname: "{{ get_hostname.stdout }}"
 
-- name: Install CRS Resource Action Script to Control the Observer
-  copy:
-    src: observer.sh
-    dest: "{{ observer_config_dir }}/observer.sh"
-    mode: u+rwx
-  
-- name: Install CRS Resource Attributes for Observer
-  template:
-    src: observer.config.j2
-    dest: "{{ observer_config_dir }}/observer.config"
-  vars:
-    observer_script: "{{ observer_config_dir }}/observer.sh"
-    ec2_hostname: "{{ my_hostname }}"
-    db_service: "{{ database_primary_sid | default(database_standby_sid) | lower }}"
-
 - name: Define Name for CRS Resource for Observer
   set_fact:
       observer_resource: "dg.observer"
+
+# Do not repeat CRS setup if rotating passwords as we assume this has already been done
+- name: Setup CRS
+  when: not password_rotation
+  block:
+
+      - name: Install CRS Resource Action Script to Control the Observer
+        copy:
+          src: observer.sh
+          dest: "{{ observer_config_dir }}/observer.sh"
+          mode: u+rwx
+        
+      - name: Install CRS Resource Attributes for Observer
+        template:
+          src: observer.config.j2
+          dest: "{{ observer_config_dir }}/observer.config"
+        vars:
+          observer_script: "{{ observer_config_dir }}/observer.sh"
+          ec2_hostname: "{{ my_hostname }}"
+          db_service: "{{ database_primary_sid | default(database_standby_sid) | lower }}"
+          ansible_aws_ssm_timeout: 60
 
 - name: Check if CRS Resource Already Exists
   shell: |
@@ -219,22 +250,19 @@
         export ORAENV_ASK=NO
         . oraenv
         crsctl add resource {{ observer_resource }} -type cluster_resource -file {{ observer_config_dir }}/observer.config
-  when: get_crs_resource.stdout is search('.*CRS-2613.*')
+  when: 
+     - get_crs_resource.stdout is search('.*CRS-2613.*')
+     - not password_rotation
 
-# Whilst we are working on configuring / resetting the Observers we want to temporarily remove them from the control of CRS
-# so that it does not attempt to restart the resources at a time not of our choosing
-- name: Disable CRS Resource for Observer
-  shell: |
-        . ~/.bash_profile
-        export ORACLE_SID=+ASM
-        export ORAENV_ASK=NO
-        . oraenv
-        crsctl modify resource {{ observer_resource }} -attr "ENABLED=0"
-  when: get_crs_resource.stdout is search('.*CRS-2613.*') or not "ENABLED=0" in get_crs_resource.stdout_lines
+# Ensure all Observers are Currently Stopped and FSFO Disabled whilst changes in progress
+- name: Disable FSFO and Stop Observers
+  include: stop-observer.yml
 
+# Setup steps only - do not change FSFO configuration during password rotation
 - name: Steps on Primary Only
-  delegate_to: "{{ groups[ primary ][0] }}"
-  run_once: true
+  when: 
+     - inventory_hostname == groups[ primary ][0]
+     - not password_rotation
   block:
 
       - name: Get Existing FSFO Health Conditions
@@ -329,6 +357,9 @@
   set_fact:
       current_fsfo_targets: "{{ get_FastStartFailoverTarget.stdout_lines[-1] | replace(\"'\",'') |  trim }}"
 
+# Much of the following steps are notionally set-up only; but we run them again during a password rotation to correct any misplacement of
+# observers which may have occurred due to password changes causing automated changes in the configuration which we do not want.
+
 - name: Initialize Databases Currently in Configuration
   set_fact:
       databases_in_configuration: []
@@ -351,26 +382,12 @@
          dgmgrl / "edit database {{ database_primary_sid | default(database_standby_sid) }} set property FastStartFailoverTarget='{{ fsfo_targets }}';"
   when: (fsfo_targets | lower ) != ( current_fsfo_targets | lower )
 
-
-
-- debug:
-    var: standby_number
-
-- debug:
-    var: standby1
-
-- debug:
-    var: hostvars[groups[ standby1 ][0]]['database_standby_sid'] 
-
-- debug:
-    var: databases_in_configuration
-
 # If we have just added a new 2nd Standby it should be added as a Failover option to an existing 1st Standby
 - name: Add New 2nd Standby as Failover Option for Existing 1st Standby
   when: 
      - standby_number | int == 2
      - ( hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower ) in databases_in_configuration
-  run_once: yes
+     - inventory_hostname == groups[ primary ][0]
   block:
 
       - name: Get FSFO Targets
@@ -399,7 +416,7 @@
      - standby_number | int == 1
      - high_availability_count | int > 1
      - ( hostvars[groups[ standby2 ][0]]['database_standby_sid'] | lower ) in databases_in_configuration
-  run_once: yes
+     - inventory_hostname == groups[ primary ][0]
   block:
 
       - name: Get FSFO Targets
@@ -419,163 +436,15 @@
                dgmgrl  -silent / "edit database {{ hostvars[groups[ standby2 ][0]]['database_standby_sid'] }} set property FastStartFailoverTarget='{{ hostvars[groups[ primary ][0]]['database_primary_sid'] | lower }},{{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower }}';"
         when: (fsfo_targets | lower ) != ( hostvars[groups[ primary ][0]]['database_primary_sid'] + "," + hostvars[groups[ standby1 ][0]]['database_standby_sid'] | lower )
         delegate_to:  "{{ hostvars[groups[ standby2 ][0]]['inventory_hostname'] }}"
-
-
-
-# Now Set up Observers for FSFO
-- name: Check Observers from Primary
-  delegate_to: "{{ groups[ primary ][0] }}"
-  run_once: true
-  block:
-
-      - name: Get Location of Observers
-        script: get_observer_hosts.sh "{{ observer_config_dir }}/observer.ora"
-        register: get_observer_hosts
-        changed_when: false
-
-      - name: Initialize Observer List
-        set_fact:
-            observer_dict: {}
-
-      # When run in CodeBuild the output of the get_observer_hosts.sh script includes the Ansible BECOME-SUCCESS marker when there are no Observers for unclear reasons.
-      # This does not happen when run locally so is difficult to debug.   As a workaround we simply ignore the output if it contains BECOME-SUCCESS-
-      # This marker does not appear when Observers do exist.
-      - name: Populate Observer Dictionary
-        set_fact:
-            observer_dict: "{{ observer_dict | combine({item.split(' ')[0]: {'observer_name': item.split(' ')[0], 'type': item.split(' ')[1], 'hostname': item.split(' ')[2]}}) }}"
-        loop: "{{ get_observer_hosts.stdout_lines | default([]) }}"
-        when: not get_observer_hosts.stdout is search ("BECOME-SUCCESS-")
-
-      - name: Stop Any Backup Observers Co-Located on Master (Want Only One per AZ)
-        shell: |
-              . ~/.bash_profile        
-              dgmgrl / "stop observer {{ item }};"
-              sleep 10
-        loop: "{{ observer_dict.keys() }}"
-        register: stop_colocate_master
-        when: 
-            - observer_dict[item].type == 'Backup'
-            - observer_dict[item].hostname == ( observer_dict | dict2items | json_query('[?value.type==`Master`].value.hostname') | first )
-
-      # Stop Non-First Co-Located Observer (We do not want to stop both Observers when they running on one host - just one of them)
-      - name: Stop Any Backup Observers Co-Located on Another Backup (Want Only One per AZ)
-        shell: |
-              . ~/.bash_profile
-              dgmgrl / "stop observer {{ item }};"
-              sleep 10
-        loop: "{{ observer_dict.keys() }}"
-        register: stop_colocate_backup
-        when: 
-            - observer_dict[item].type == 'Backup'
-            - observer_dict[item].observer_name != ( observer_dict | dict2items | json_query('[?value.hostname==`' + observer_dict[item].hostname + '`].value.observer_name') | first )
-
-# Even if we are running a build on Standby #2 we still need to know the hostname of Standby #1 as this is the preferred target
-# for the Master Observer.    Therefore we gather this hostname explictly and delegate the fact.
-- name: Get 1st Standby Hostname
-  shell: | 
-         hostname
-  register: get_hostname_1st_standby
-  delegate_to: "{{ groups[ standby1 ][0] }}"
-  run_once: true
-  changed_when: false
-
-- debug:
-    msg: "Hostname 1st Standby: {{ get_hostname_1st_standby.stdout }}"
-
-- name: Set 1st Standby Hostname
-  set_fact:
-      my_hostname: "{{ get_hostname_1st_standby.stdout }}" 
-  delegate_to: "{{ groups[ standby1 ][0] }}"    
-  delegate_facts: true
-  run_once: true
-
-# If we need to stop the Master Observer to change the password, then we will need to disable Fast Start Failover first
-- name: Disable Fast Start Failover
-  shell: |
-      . ~/.bash_profile
-      dgmgrl / "disable fast_start failover;"
-  when: 
-     - my_hostname == ( observer_dict | dict2items | json_query('[?value.type==`Master`].value.hostname') | first | default('none') )
-     - ( password_update_count | int ) > 0
-
-- debug: 
-     msg: "{{ observer_dict | dict2items | json_query('[?value.hostname==`' + my_hostname + '`].value.observer_name') | list }}"
-
-# Stop all the Observers on this host if the password has been changed to then allow it to restart with the new password
-# Note that the stopping of Observers can take a long time to complete
-- name: Stop Observers if Password Changed
-  script: stop_observer.sh "{{ observer_config_dir }}/observer.ora" "{{ item }}"
-  loop: "{{ observer_dict | dict2items | json_query('[?value.hostname==`' + my_hostname + '`].value.observer_name') | list }}"
-  when: 
-    - ( password_update_count | int ) > 0
-    - ( item | length ) > 1
-  vars:
-    ansible_aws_ssm_timeout: 600
-
-# If any Observers have been stopped, refresh the dictionary of observers
-- name: Refresh Observers After Stop
-  when: stop_colocate_master.changed or stop_colocate_backup.changed or (( password_update_count | int ) > 0)
-  delegate_to: "{{ groups[ primary ][0] }}"
-  run_once: true
-  block:
-
-      - name: Get Updated Location of Observers
-        script: get_observer_hosts.sh "{{ observer_config_dir }}/observer.ora"
-        register: get_observer_hosts
-        changed_when: false
-
-      - name: Re-Initialize Observer Dictionary
-        set_fact:
-            observer_dict: {}
-
-      - name: Re-Populate Observer Dictionary
-        set_fact:
-            observer_dict: "{{ observer_dict | combine({item.split(' ')[0]: {'observer_name': item.split(' ')[0], 'type': item.split(' ')[1], 'hostname': item.split(' ')[2]}}) }}"
-        loop: "{{ get_observer_hosts.stdout_lines | default([])  }}"
-        when: not get_observer_hosts.stdout is search ("BECOME-SUCCESS")
-
-      - debug: var=observer_dict
-
-- name: Start 1st Standby Observer
-  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ configuration_wide_service_name }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
-  when: 
-      - standby_number | int >= 1
-      - inventory_hostname in groups[ standby1 ]
-      - my_hostname not in ( observer_dict.values() | map(attribute='hostname') | list )
-
-- name: Start 2nd Standby Observer
-  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ configuration_wide_service_name }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
-  when: 
-      - standby_number | int == 2
-      - inventory_hostname in groups[ standby2 ]
-      - my_hostname not in ( observer_dict.values() | map(attribute='hostname') | list )
-
-# Observer on Primary is not initially useful but may be required following switchover or failover.
-# Set it to initially monitor the 1st Standby
-- name: Start Primary Observer
-  script: start_observing.sh "{{observer_config_dir }}/observer.ora" "{{ configuration_wide_service_name }}" "{{observer_config_dir }}/observer.log" "{{observer_config_dir }}/fsfo.dat"
-  when: 
-      - inventory_hostname in groups[ primary ]
-      - my_hostname not in ( observer_dict.values() | map(attribute='hostname') | list )
-    
+     
 - name: Steps on Primary Only
-  run_once: true
+  when: inventory_hostname == groups[ primary ][0]
   block:
 
       - name: Set FSFO Mode
         include: set-fsfo-mode.yml
         vars:
            delegation_host: "{{ groups[ primary ][0] }}"
-
-      - name: Set Placement of FSFO Observer Mode
-        include: place-fsfo-observer.yml
-        vars:
-           delegation_host: "{{ groups[ primary ][0] }}"
-           master_observer_target_host: "{{ hostvars[groups[ standby1 ][0]]['my_hostname'] }}"
-           master_observer_target_database: "{{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] }}"
-           databases_in_data_guard: "{{ databases_in_configuration }}"
-           fallback_master_observer_target_host: "{{ hostvars[groups[ standby2 ][0]]['my_hostname'] }}"
-           fallback_master_observer_target_database: "{{ hostvars[groups[ standby2 ][0]]['database_standby_sid'] }}"
 
       # The currently preferred active target is the first FastStartFailoverTarget on the primary
       - name: Set Active Target 
@@ -584,24 +453,5 @@
            delegation_host: "{{ groups[ primary ][0] }}"
            preferred_active_target: "{{ hostvars[groups[ primary ][0]]['fsfo_targets'].split(',')[0] | lower | trim }}"
            
-# Now we have completed the set-up of the Observers (or Password Change) we can allow CRS to start managing their availability again.
-# (This is required to ensure that Observers are restarted if the server is rebooted)
-- name: Check if CRS Resource is Still Disabled
-  shell: |
-        . ~/.bash_profile
-        export ORACLE_SID=+ASM
-        export ORAENV_ASK=NO
-        . oraenv
-        crsctl status resource {{ observer_resource }} -p
-  changed_when: false
-  register: get_crs_resource
-
-- name: Restart and Check CRS Resource for Observer
-  shell: |
-        . ~/.bash_profile
-        export ORACLE_SID=+ASM
-        export ORAENV_ASK=NO
-        . oraenv
-        crsctl modify resource {{ observer_resource }} -attr "ENABLED=1"
-        crsctl check resource {{ observer_resource }}
-  when: not "ENABLED=1" in get_crs_resource.stdout_lines
+- name: Restart Observers
+  include: start-observer.yml

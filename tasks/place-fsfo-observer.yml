@@ -1,26 +1,12 @@
-     
-      - name: Get Location of Master Observer
-        script: get_master_observer_host.sh "{{ observer_config_dir }}/observer.ora"
-        register: get_master_observer_host
-        delegate_to: "{{ delegation_host }}"
-        changed_when: false
+# This functionality is no longer required
+# However the task is still currently called by enable_fsfo.yml for Release Updates
+# and cannot be removed yet as the code is required for MIS Patching
 
-      - debug:
-           msg: "Master Observer Host: {{ get_master_observer_host.stdout | trim }}.   Target Master Observer Host: {{ master_observer_target_host }}"
+# Remove Null Code After MIS Patched to 19.14
 
-      - name: Move Master Observer to 1st Standby
-        script: set_master_observer_host.sh "{{ observer_config_dir }}/observer.ora" "{{ master_observer_target_host }}"
-        delegate_to: "{{ delegation_host }}"
-        when: 
-           - ( get_master_observer_host.stdout | trim ) != ( master_observer_target_host | trim )
-           - master_observer_target_database | lower in databases_in_data_guard
+- debug:
+    msg:  "THIS STEP IS NOT REQUIRED"
 
-      - name: Move Master Observer to 2nd Standby if 1st Standby Not Available
-        script: set_master_observer_host.sh "{{ observer_config_dir }}/observer.ora" "{{ fallback_master_observer_target_host }}"
-        delegate_to: "{{ delegation_host }}"
-        when: 
-           - standby_number | int == 2
-           - (get_master_observer_host.stdout | trim ) != ( fallback_master_observer_target_host  | trim )
-           - not master_observer_target_database | lower in databases_in_data_guard
-           - fallback_master_observer_target_host | lower in databases_in_data_guard
- 
+
+# Note that the START_OBSERVER and STOP_OBSERVER functionality should also
+# be removed from the Release Update code and use the tasks in this role instead
