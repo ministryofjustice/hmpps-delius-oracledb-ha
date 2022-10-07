@@ -318,8 +318,7 @@ then
       # Check for defunct Observers on this host and stop them
       stop_defunct_observer
       echo
-      # Check if this is the intended site for the master observer 
-      # and change the type of the observer if it is not currently so
+      # Check and Change Master Observer if not on the correct host
       set_master_observer
       echo
 else
