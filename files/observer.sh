@@ -112,6 +112,8 @@ then
          # This is the host where the active target database should be running
          # (We do not attempt changing target from other hosts as we want to ensure the target host is up)
          echo "set fast_start failover target to ${PREFERRED_ACTIVE_TARGET_DATABASE};" | dgmgrl -silent /
+         # Allow time for this change to become visibile to all brokers
+         sleep 60
       else
          echo "Preferred Target is not ready - keeping current target"
       fi
@@ -119,40 +121,32 @@ then
 fi
 }
 
-
-function assume_master_observer_role()
+function get_database_host()
 {
-# Set Any Observer on this Host to be the Master (Arbitrarily the First)
-THIS_OBSERVER=$(get_observers | awk '{print $1}')
-THIS_OBSERVER_TYPE=$(get_observer_type ${THIS_OBSERVER})
-if [[ "${THIS_OBSERVER_TYPE}" == "Backup" ]];
-then
-   HOSTNAME=$(hostname)
-   echo "Becoming Master Observer"
-   set_master_observer_host ${HOSTNAME}
-fi
+   DATABASE=$1
+   dgmgrl / "show database verbose $DATABASE" | awk '/HostName/{print $NF}' | sed 's/'"'"'//g'
 }
-
 
 function set_master_observer()
 {
-ACTIVE_TARGET_SID=$(get_active_target_db | tr 'a-z' 'A-Z')
-NON_ACTIVE_TARGET_SID=$(get_non_active_target_db | tr 'a-z' 'A-Z')
-LOCAL_SID=$(echo $ORACLE_SID | tr 'a-z' 'A-Z')
-# If the Non-Active Target Database is running on this Host, make this the Master Observer
-# i.e. Run the Master Observer on 3rd site which is neither Primary nor Standby
-# (This is recommended practice)
-if [[ ! -z "${NON_ACTIVE_TARGET_SID}"
-     && "${NON_ACTIVE_TARGET_SID}" == "${LOCAL_SID}" ]];
+MASTER_OBSERVER_HOST=$(get_master_observer_host)
+ACTIVE_TARGET_DB=$(get_active_target_db | tr 'a-z' 'A-Z')
+ACTIVE_TARGET_HOST=$(get_database_host ${ACTIVE_TARGET_DB})
+NON_ACTIVE_TARGET_DB=$(get_non_active_target_db | tr 'a-z' 'A-Z')
+NON_ACTIVE_TARGET_HOST=$(get_database_host ${NON_ACTIVE_TARGET_DB})
+
+# If Non-Active Target Database Host exists, this should be location of Master Observer
+if [[ ! -z "${NON_ACTIVE_TARGET_DB}"
+   && "${MASTER_OBSERVER_HOST}" != "${NON_ACTIVE_TARGET_HOST}" ]];
 then
-   assume_master_observer_role
-# If there is no Non-Active Target Database (i.e. there is only one standby),
-# then use the Standby site as master
-elif [[ ! -z "${ACTIVE_TARGET_SID}"
-     &&   -z "${NON_ACTIVE_TARGET_SID}"
-     && "${ACTIVE_TARGET_SID}" == "${LOCAL_SID}" ]];
+   set_master_observer_host ${NON_ACTIVE_TARGET_HOST}
+fi
+
+# If Non-Active Target Database Host does not exist, Active Target should be location of Master Observer
+if [[ -z "${NON_ACTIVE_TARGET_DB}"
+   && "${MASTER_OBSERVER_HOST}" != "${ACTIVE_TARGET_HOST}" ]];
 then
-   assume_master_observer_role
+   set_master_observer_host ${ACTIVE_TARGET_HOST}
 fi
 }
 
@@ -324,8 +318,7 @@ then
       # Check for defunct Observers on this host and stop them
       stop_defunct_observer
       echo
-      # Check if this is the intended site for the master observer 
-      # and change the type of the observer if it is not currently so
+      # Check and Change Master Observer if not on the correct host
       set_master_observer
       echo
 else
