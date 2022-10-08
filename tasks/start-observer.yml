@@ -1,6 +1,6 @@
 # Now we have completed the set-up of the Observers (or Password Change) we can allow CRS to start managing their availability again.
 # (This is required to ensure that Observers are restarted if the server is rebooted)
-- name: Check if CRS Resource is Still Disabled
+- name: Check if CRS Resource is Disabled
   shell: |
         . ~/.bash_profile
         export ORACLE_SID=+ASM
@@ -10,7 +10,7 @@
   changed_when: false
   register: get_crs_resource
 
-- name: Re-Enable CRS Resource for Observer
+- name: Enable CRS Resource for Observer
   shell: |
         . ~/.bash_profile
         export ORACLE_SID=+ASM

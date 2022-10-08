@@ -19,7 +19,7 @@
 
 export CONFIG="set ObserverConfigFile=${ORACLE_BASE}/dg_observer/observer.ora;"
 
-#DEBUG=TRUE
+DEBUG=TRUE
 
 
 if [[ "$DEBUG" == "TRUE" ]];
