@@ -338,7 +338,7 @@
         set_fact:
             current_fsfo_threshold: "{{ get_FSFOThreshold.stdout_lines[-1] | replace(\"'\",'') |  trim }}"
 
-      - name: Configure Fast Start Failover Timeout Threshold
+      - name: Configure Fast Start Failover Timeout Threshold if Different
         shell: |               
               . ~/.bash_profile
               dgmgrl -silent  / 'edit configuration set property FastStartFailoverThreshold = {{ target_fsfo_threshold }};'
