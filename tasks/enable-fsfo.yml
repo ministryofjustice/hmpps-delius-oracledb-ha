@@ -1,0 +1,62 @@
+- name: Set FSFO Mode
+  include_tasks: set-fsfo-mode.yml
+  vars:
+     standby1: "{{ database_type + '_standbydb1' }}"
+     standby2: "{{ database_type + '_standbydb2' }}"
+   
+# During outage of databases during flashback it is possible that the Active Target may have changed.
+# The following tasks ensure it is reset to its expected target.  
+- name: Initialize Databases Currently in Configuration and FSFO Targets
+  set_fact:
+      databases_in_configuration: []
+      fsfo_targets: ''
+   
+- name: Determine FSFO Targets on Primary 
+  include_tasks: determine-fsfo-targets.yml
+  vars:
+     standby1_hostname:  "{{ hostvars[groups[database_type + '_standbydb1'][0]]['inventory_hostname'] }}"
+     standby2_hostname:  "{{ hostvars[groups[database_type + '_standbydb2'][0]]['inventory_hostname'] | default('') }}"
+
+- name: Set Active Target to First Failover Target
+  include_tasks: set-fsfo-active-target.yml
+  vars:
+     preferred_active_target: "{{ fsfo_targets.split(',')[0] | lower | trim }}"
+
+# Bounce the Primary Observer (only) to Ensure Correct Placement of Master since location will have been lost when FSFO Disabled
+# (NB:  This will only bounce just one of the observers, on the Primary Host, but any observer is able to move the Master if required)
+- name: Check if Primary CRS Resource is Running
+  shell: |
+        . ~/.bash_profile
+        export ORACLE_SID=+ASM
+        export ORAENV_ASK=NO
+        . oraenv
+        crsctl status resource dg.observer
+  changed_when: false
+  delegate_to: "{{ delegation_host }}"
+  register: get_crs_resource_status
+
+- name: Stop Primary Observer
+  shell: |
+         . ~/.bash_profile
+         export ORACLE_SID=+ASM
+         export ORAENV_ASK=NO
+         . oraenv
+         crsctl stop res dg.observer
+  when: get_crs_resource_status.stdout is search('.*STATE=ONLINE.*')
+  delegate_to: "{{ delegation_host }}"
+  retries: 3
+  delay: 400
+
+- name: Start Primary Observer
+  shell: |
+         . ~/.bash_profile
+         export ORACLE_SID=+ASM
+         export ORAENV_ASK=NO
+         . oraenv
+         crsctl start res dg.observer
+  register: start_observer
+  delegate_to: "{{ delegation_host }}"
+  retries: 3
+  delay: 400
+  until: start_observer is not failed or start_observer.stdout is search('.*CRS-5702.*')
+  failed_when: start_observer.rc !=0 and not start_observer.stdout is search('.*CRS-5702.*') 

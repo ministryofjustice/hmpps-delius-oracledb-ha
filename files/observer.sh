@@ -318,12 +318,12 @@ then
       # Check for defunct Observers on this host and stop them
       stop_defunct_observer
       echo
-      # Check and Change Master Observer if not on the correct host
-      set_master_observer
-      echo
 else
     echo "Observer already started"
 fi
+# Check and Change Master Observer if not on the correct host
+set_master_observer
+echo
 RC=$(check_observer)
 }
 

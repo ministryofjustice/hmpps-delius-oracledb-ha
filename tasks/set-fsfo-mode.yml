@@ -18,6 +18,7 @@
                . ~/.bash_profile
                dgmgrl / "show configuration" | grep "{{ hostvars[groups[ standby1 ][0]]['database_standby_unique'] | lower }}" | cat
         register: config_standby1
+        changed_when: false
 
       - name: Wait for Data Guard Lag on Standby 1 to Drop to Zero
         shell: |
@@ -39,6 +40,7 @@
                . ~/.bash_profile
                dgmgrl / "show configuration" | grep "{{ hostvars[groups[ standby2 ][0]]['database_standby_unique'] | lower }}" | cat
         register: config_standby2
+        changed_when: false
 
       - name: Wait for Data Guard Lag on Standby 2 to Drop to Zero
         shell: |
@@ -54,7 +56,7 @@
         retries: 60
 
       # Prepare for Mode Change if Needed
-      - name: Disble Fast-Start Failover
+      - name: Disable Fast-Start Failover
         shell: |
                . ~/.bash_profile
                dgmgrl -silent / "disable fast_start failover"
@@ -63,6 +65,8 @@
             - ( get_fast_start_failover.stdout | trim ) != 'Disabled'
             - ( (get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | default('disabled') | lower == 'enabled') )
               or ( (not get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | default('disabled') | lower in ['observe','observer']) )
+        retries: 3
+        delay: 60
 
       # Accept both 'observe' or 'observer' as a valid mode
       - name: Enable Observe-Only Mode

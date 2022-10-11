@@ -36,14 +36,26 @@
   register: unlock_sys_account
   when: inventory_hostname in groups[ primary ]
 
-- name: Start Offline CRS Resource
+# We always stop the Observer if it is already running so we ensure it is restarted with the
+# current password (if the wallet password has changed)
+- name: Stop Observer CRS Resource
   shell: |
          . ~/.bash_profile
          export ORACLE_SID=+ASM
          export ORAENV_ASK=NO
          . oraenv
-         crsctl start res dg.observer
-  when: get_crs_resource_status.stdout is search('.*STATE=OFFLINE.*')
+         crsctl stop res {{ observer_resource }}
+  when: get_crs_resource_status.stdout is search('.*STATE=ONLINE.*')
+  retries: 3
+  delay: 400
+
+- name: Start Observer CRS Resource
+  shell: |
+         . ~/.bash_profile
+         export ORACLE_SID=+ASM
+         export ORAENV_ASK=NO
+         . oraenv
+         crsctl start res {{ observer_resource }}
   register: start_observer
   retries: 3
   delay: 400
