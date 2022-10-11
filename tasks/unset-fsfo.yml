@@ -4,6 +4,9 @@
   set_fact:
       observer_resource: "dg.observer"
 
+- name: Ensure FSFO is Disabled and Observer is Stopped
+  include_tasks: stop-observer.yml
+
 - name: Check if CRS Resource Already Exists
   shell: |
         . ~/.bash_profile
