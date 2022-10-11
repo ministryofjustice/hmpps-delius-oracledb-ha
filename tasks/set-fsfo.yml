@@ -320,12 +320,13 @@
       - name: Set Observer Reconnection Attempt Interval
         set_fact:
             current_observer_reconnect: "{{ get_ObserverReconnect.stdout_lines[-1] | replace(\"'\",'') |  trim }}"
+        when: get_ObserverReconnect.stdout != ''
 
       - name: Configure Observer Reconnection Attempt Interval
         shell: |               
               . ~/.bash_profile
               dgmgrl -silent  / 'edit configuration set property ObserverReconnect = {{ target_fsfo_observer_reconnect }};'
-        when: ( target_fsfo_observer_reconnect | int ) != ( current_observer_reconnect | int )
+        when: ( target_fsfo_observer_reconnect | int ) != ( current_observer_reconnect | default(30) | int )
 
       - name: Get Fast Start Failover Timeout Threshold
         shell: |

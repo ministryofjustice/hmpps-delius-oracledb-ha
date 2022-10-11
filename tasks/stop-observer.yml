@@ -1,0 +1,37 @@
+- name: Get Fast-Start Failover Status
+  shell: |
+        . ~/.bash_profile
+        dgmgrl -silent / "show configuration;" | awk -F: '/Fast-Start Failover/{print $2}'
+  register: get_fast_start_failover
+  changed_when: false
+  run_once: true
+
+- name: Disable Fast Start Failover
+  shell: |
+      . ~/.bash_profile
+      dgmgrl / "disable fast_start failover;"
+  when: ( get_fast_start_failover.stdout | trim ) != 'Disabled'
+  run_once: true
+  vars:
+          ansible_aws_ssm_timeout: 60
+
+- name: Check if CRS Resource is Running
+  shell: |
+        . ~/.bash_profile
+        export ORACLE_SID=+ASM
+        export ORAENV_ASK=NO
+        . oraenv
+        crsctl status resource {{ observer_resource }}
+  changed_when: false
+  register: get_crs_resource_status
+
+- name: Stop Observer CRS Resource
+  shell: |
+         . ~/.bash_profile
+         export ORACLE_SID=+ASM
+         export ORAENV_ASK=NO
+         . oraenv
+         crsctl stop res {{ observer_resource }}
+  when: get_crs_resource_status.stdout is search('.*STATE=ONLINE.*')
+  retries: 3
+  delay: 400
