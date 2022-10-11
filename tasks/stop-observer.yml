@@ -1,3 +1,4 @@
+# Disable FSFO before stopping Observers.   FSFO Cannot be used without an Observer.
 - name: Get Fast-Start Failover Status
   shell: |
         . ~/.bash_profile
@@ -6,6 +7,7 @@
   changed_when: false
   run_once: true
 
+# We only need to stop FSFO from one host as it is defined Configuration-Wide
 - name: Disable Fast Start Failover
   shell: |
       . ~/.bash_profile
