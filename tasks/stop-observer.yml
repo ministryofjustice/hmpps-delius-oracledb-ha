@@ -35,5 +35,7 @@
          . oraenv
          crsctl stop res {{ observer_resource }}
   when: get_crs_resource_status.stdout is search('.*STATE=ONLINE.*')
+  register: stop_crs_resource
+  until: stop_crs_resource.rc == 0
   retries: 3
   delay: 400
