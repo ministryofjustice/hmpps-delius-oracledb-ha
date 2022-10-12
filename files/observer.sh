@@ -327,6 +327,13 @@ echo
 RC=$(check_observer)
 }
 
+function is_broker_available()
+{
+# Check for Broker Not Available Error
+echo -e "show configuration;" | dgmgrl -silent / | grep -c ORA-16525
+}
+
+
 function count_data_guard_errors()
 {
 # Ignore ORA-16819 (Observer not started) since we are about to start it
@@ -338,8 +345,22 @@ echo -e "show configuration;" | dgmgrl -silent / | grep -v ORA-16819 | grep -v O
 function check_data_guard()
 {
 COUNT=1
-# Loop a few times to allow time for any errors to clear
-while (( COUNT <= 120 ));
+# Loop up to 5 minutes allow time for the Broker to start
+while (( COUNT <= 300 ));
+do
+  echo -ne "."
+  sleep 1
+  CHECK=$(is_broker_available)
+  if [[ ${CHECK} -eq 0 ]];
+  then
+     break
+  fi
+  COUNT=$(( COUNT+1 ))
+done
+echo
+COUNT=1
+# Loop up to 5 minutes allow time for any other errors to clear
+while (( COUNT <= 300 ));
 do
   echo -ne "."
   sleep 1
