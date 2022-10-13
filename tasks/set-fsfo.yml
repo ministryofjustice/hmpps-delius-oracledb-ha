@@ -254,9 +254,25 @@
      - get_crs_resource.stdout is search('.*CRS-2613.*')
      - not password_rotation
 
-# Ensure all Observers are Currently Stopped and FSFO Disabled whilst changes in progress
-- name: Disable FSFO and Stop Observers
-  include: stop-observer.yml
+# Whilst we are working on configuring / resetting the Observers we want to temporarily remove them from the control of CRS
+# so that it does not attempt to restart the resources at a time not of our choosing
+- name: Get Fast-Start Failover Status
+  shell: |
+        . ~/.bash_profile
+        dgmgrl -silent / "show configuration;" | awk -F: '/Fast-Start Failover/{print $2}'
+  register: get_fast_start_failover
+  changed_when: false
+
+# Disable Fast Start Failover before stopping Observers to prevent a failover attempt (Run from Primary)
+- name: Disable Fast Start Failover
+  shell: |
+      . ~/.bash_profile
+      dgmgrl / "disable fast_start failover;"
+  when:
+    - inventory_hostname == groups[ primary ][0]
+    -  ( get_fast_start_failover.stdout | trim ) != 'Disabled'
+  vars:
+          ansible_aws_ssm_timeout: 60
 
 # Setup steps only - do not change FSFO configuration during password rotation
 - name: Steps on Primary Only
@@ -304,12 +320,13 @@
       - name: Set Observer Reconnection Attempt Interval
         set_fact:
             current_observer_reconnect: "{{ get_ObserverReconnect.stdout_lines[-1] | replace(\"'\",'') |  trim }}"
+        when: get_ObserverReconnect.stdout != ''
 
       - name: Configure Observer Reconnection Attempt Interval
         shell: |               
               . ~/.bash_profile
               dgmgrl -silent  / 'edit configuration set property ObserverReconnect = {{ target_fsfo_observer_reconnect }};'
-        when: ( target_fsfo_observer_reconnect | int ) != ( current_observer_reconnect | int )
+        when: ( target_fsfo_observer_reconnect | int ) != ( current_observer_reconnect | default(30) | int )
 
       - name: Get Fast Start Failover Timeout Threshold
         shell: |
@@ -407,6 +424,8 @@
                dgmgrl / "edit database {{ hostvars[groups[ standby1 ][0]]['database_standby_sid'] }} set property FastStartFailoverTarget='{{ hostvars[groups[ primary ][0]]['database_primary_sid'] | lower }},{{ hostvars[groups[ standby2 ][0]]['database_standby_sid'] | lower }}';"
         when: (fsfo_targets | lower ) != (  hostvars[groups[ primary ][0]]['database_primary_sid'] + "," + hostvars[groups[ standby2 ][0]]['database_standby_sid'] | lower )
         delegate_to:  "{{ hostvars[groups[ standby1 ][0]]['inventory_hostname'] }}"
+        retries: 3
+        delay: 60
 
 # If we have just added a new 1st Standby it should be added as a Failover option to an existing 2nd Standby
 # This block is unlikely to be called much.   It will only be called under the scenario that the 1st standby has been lost
@@ -453,5 +472,5 @@
            delegation_host: "{{ groups[ primary ][0] }}"
            preferred_active_target: "{{ hostvars[groups[ primary ][0]]['fsfo_targets'].split(',')[0] | lower | trim }}"
            
-- name: Restart Observers
+- name: Start Observers if Not Running
   include: start-observer.yml

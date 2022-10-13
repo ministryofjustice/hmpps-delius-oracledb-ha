@@ -1,6 +1,6 @@
 # Now we have completed the set-up of the Observers (or Password Change) we can allow CRS to start managing their availability again.
 # (This is required to ensure that Observers are restarted if the server is rebooted)
-- name: Check if CRS Resource is Still Disabled
+- name: Check if CRS Resource is Disabled
   shell: |
         . ~/.bash_profile
         export ORACLE_SID=+ASM
@@ -10,7 +10,7 @@
   changed_when: false
   register: get_crs_resource
 
-- name: Re-Enable CRS Resource for Observer
+- name: Enable CRS Resource for Observer
   shell: |
         . ~/.bash_profile
         export ORACLE_SID=+ASM
@@ -36,14 +36,26 @@
   register: unlock_sys_account
   when: inventory_hostname in groups[ primary ]
 
-- name: Start Offline CRS Resource
+# We always stop the Observer if it is already running so we ensure it is restarted with the
+# current password (if the wallet password has changed)
+- name: Stop Observer CRS Resource
   shell: |
          . ~/.bash_profile
          export ORACLE_SID=+ASM
          export ORAENV_ASK=NO
          . oraenv
-         crsctl start res dg.observer
-  when: get_crs_resource_status.stdout is search('.*STATE=OFFLINE.*')
+         crsctl stop res {{ observer_resource }}
+  when: get_crs_resource_status.stdout is search('.*STATE=ONLINE.*')
+  retries: 3
+  delay: 400
+
+- name: Start Observer CRS Resource
+  shell: |
+         . ~/.bash_profile
+         export ORACLE_SID=+ASM
+         export ORAENV_ASK=NO
+         . oraenv
+         crsctl start res {{ observer_resource }}
   register: start_observer
   retries: 3
   delay: 400
