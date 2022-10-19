@@ -41,6 +41,8 @@
                dgmgrl / "show configuration" | grep "{{ hostvars[groups[ standby2 ][0]]['database_standby_unique'] | lower }}" | cat
         register: config_standby2
         changed_when: false
+        when: 
+           - high_availability_count | int == 2
 
       - name: Wait for Data Guard Lag on Standby 2 to Drop to Zero
         shell: |
