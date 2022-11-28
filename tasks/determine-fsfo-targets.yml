@@ -41,11 +41,17 @@
           - ( databases_in_configuration | length ) == 3
           - databases_in_configuration[2] < databases_in_configuration[1]
 
+      # If there are only 2 DBs in the configuration (one Primary & one Standby),
+      # then set the FSFO Target for the single Standby as the Primary
+      # (i.e. if we failover to the Standby, then the Primary is the new FSFO target)
+      # Normally we would expect the one Standby to be on standby1_hostname, but if
+      # there is a fault on that instance, it may be on standby2_hostname, so we
+      # need to check if the delegation host is either of these instances
       - name: Determine Required FSFO Target (Primary) for New First Standby
         set_fact:
           fsfo_targets: "{{ databases_in_configuration[0] }}"
         when: 
-          - delegation_host in [standby1_hostname,standby2_hostname]
+          - delegation_host == (standby1_hostname | default('NOT_SET')) or delegation_host == (standby2_hostname | default('NOT_SET'))
           - ( databases_in_configuration | length | int ) < 3
 
       # If we have added a second standby then the FSFO target should be the primary and the *other* standby
