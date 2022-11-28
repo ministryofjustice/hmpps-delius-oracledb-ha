@@ -15,7 +15,7 @@
   include_tasks: determine-fsfo-targets.yml
   vars:
      standby1_hostname:  "{{ hostvars[groups[database_type + '_standbydb1'][0]]['inventory_hostname'] }}"
-     standby2_hostname:  "{{ hostvars[groups[database_type + '_standbydb2'][0]]['inventory_hostname'] | default('') }}"
+     standby2_hostname:  "{{ hostvars[(groups[database_type + '_standbydb2']|default([]))[0]|default({})]['inventory_hostname'] | default('') }}"
 
 - name: Set Active Target to First Failover Target
   include_tasks: set-fsfo-active-target.yml
