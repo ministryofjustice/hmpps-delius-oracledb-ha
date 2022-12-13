@@ -336,9 +336,15 @@ echo -e "show configuration;" | dgmgrl -silent / | grep -c ORA-16525
 
 function count_data_guard_errors()
 {
+# Do not start the local Observer if there are Data Guard errors present for the local database
+#
 # Ignore ORA-16819 (Observer not started) since we are about to start it
 # Ignore ORA-16820 (Database not being observed) for same reason
-echo -e "show configuration;" | dgmgrl -silent / | grep -v ORA-16819 | grep -v ORA-16820 | grep -c ORA-
+#
+# Ignore ORA-16737 (Redo Transport error) as Primary Observer may start before Standby Observers
+# Ignore ORA-16817 (Unsynchronized FSFO) and ORA-16869 (FSFO Target Not Initialized) for same reason
+LOCALDB=$(echo ${ORACLE_SID} | tr '[A-Z]' '[a-z]')
+echo -e "show database ${LOCALDB};" | dgmgrl -silent / | grep -v ORA-16819 | grep -v ORA-16820  | grep -v ORA-16737 | grep -v ORA-16817 | grep -v ORA-16869 | grep -c ORA-
 }
 
 
@@ -482,3 +488,4 @@ usage;
 esac
 
 exit 0
+
