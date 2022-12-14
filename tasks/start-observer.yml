@@ -38,6 +38,8 @@
 
 # We always stop the Observer if it is already running so we ensure it is restarted with the
 # current password (if the wallet password has changed)
+# Throttle the shutdown of the observers to 1 at a time.   This prevents Observers trying
+# to pass the Master role back and forth between them as they shutdown.
 - name: Stop Observer CRS Resource
   shell: |
          . ~/.bash_profile
@@ -48,6 +50,7 @@
   when: get_crs_resource_status.stdout is search('.*STATE=ONLINE.*')
   retries: 3
   delay: 400
+  throttle: 1
 
 - name: Start Observer CRS Resource
   shell: |
