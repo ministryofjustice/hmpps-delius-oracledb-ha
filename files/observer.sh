@@ -167,7 +167,7 @@ if [[ ! -z "${NON_ACTIVE_TARGET_DB}"
    && ! " ${RUNNING_OBSERVER_HOST_ARRAY[*]} " =~ " ${NON_ACTIVE_TARGET_HOST} " 
    && " ${RUNNING_OBSERVER_HOST_ARRAY[*]} " =~ " ${ACTIVE_TARGET_HOST} " ]];
 then
-   set_master_observer_host ${NON_ACTIVE_TARGET_HOST}
+   set_master_observer_host ${ACTIVE_TARGET_HOST}
 fi
 }
 
