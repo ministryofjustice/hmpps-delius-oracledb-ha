@@ -147,7 +147,7 @@ RUNNING_OBSERVER_HOST_ARRAY=($(dgmgrl -silent / 'show observer;' | awk -F: '/Hos
 # If Non-Active Target Database Host exists and has a Running Observer, this should be location of Master Observer
 if [[ ! -z "${NON_ACTIVE_TARGET_DB}"
    && "${MASTER_OBSERVER_HOST}" != "${NON_ACTIVE_TARGET_HOST}" 
-   && " ${RUNNING_OBSERVER_HOST_ARRAY[*]} " =~ " ${NON_ACTIVE_TARGET_DB} " ]];
+   && " ${RUNNING_OBSERVER_HOST_ARRAY[*]} " =~ " ${NON_ACTIVE_TARGET_HOST} " ]];
 then
    set_master_observer_host ${NON_ACTIVE_TARGET_HOST}
 fi
@@ -155,7 +155,7 @@ fi
 # If Non-Active Target Database Host does not exist, Active Target should be location of Master Observer provided Observer is running
 if [[ -z "${NON_ACTIVE_TARGET_DB}"
    && "${MASTER_OBSERVER_HOST}" != "${ACTIVE_TARGET_HOST}"
-   && " ${RUNNING_OBSERVER_HOST_ARRAY[*]} " =~ " ${ACTIVE_TARGET_DB} " ]];
+   && " ${RUNNING_OBSERVER_HOST_ARRAY[*]} " =~ " ${ACTIVE_TARGET_HOST} " ]];
 then
    set_master_observer_host ${ACTIVE_TARGET_HOST}
 fi
@@ -164,8 +164,8 @@ fi
 # but an Observer exists on the Active Target Host, then make this the Master Observer 
 if [[ ! -z "${NON_ACTIVE_TARGET_DB}"
    && "${MASTER_OBSERVER_HOST}" != "${NON_ACTIVE_TARGET_HOST}" 
-   && ! " ${RUNNING_OBSERVER_HOST_ARRAY[*]} " =~ " ${NON_ACTIVE_TARGET_DB} " 
-   && " ${RUNNING_OBSERVER_HOST_ARRAY[*]} " =~ " ${ACTIVE_TARGET_DB} " ]];
+   && ! " ${RUNNING_OBSERVER_HOST_ARRAY[*]} " =~ " ${NON_ACTIVE_TARGET_HOST} " 
+   && " ${RUNNING_OBSERVER_HOST_ARRAY[*]} " =~ " ${ACTIVE_TARGET_HOST} " ]];
 then
    set_master_observer_host ${NON_ACTIVE_TARGET_HOST}
 fi
