@@ -70,14 +70,18 @@ echo "show database ${ACTIVE_TARGET_DB}" | dgmgrl -silent / | grep -A10 "PHYSICA
 function poll_for_target_readiness()
 {
 # Wait for Target Database to become Ready to be Active Target
+ACTIVE_TARGET_DB=$1
+# Return 1 if the required Target database is Ready to be the Active Target
 COUNT=1
 while (( COUNT<= 100 ));
 do
   echo -ne "."
-  CHECK=$(is_active_target_database_ready)
+  CHECK=$(is_active_target_database_ready ${ACTIVE_TARGET_DB})
   if [[ ${CHECK} -eq 1 ]];
   then 
-     break
+     echo
+     echo "READY"
+     return
   fi
   COUNT=$(( COUNT+1 ))
 done
@@ -105,7 +109,7 @@ then
    if [[ ${IS_PREFERRED_ACTIVE_TARGET_HOST} -eq 1 ]];
    then
       echo "Preferred Active Target Database is on this host."
-      READY=$(poll_for_target_readiness)
+      READY=$(poll_for_target_readiness ${PREFERRED_ACTIVE_TARGET_DATABASE} | tail -1)
       if [[ "${READY}" != "NOT READY" ]];
       then
          echo "Swapping preferred Active Target"
