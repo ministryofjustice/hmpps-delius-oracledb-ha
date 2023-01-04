@@ -19,7 +19,7 @@
 
 export CONFIG="set ObserverConfigFile=${ORACLE_BASE}/dg_observer/observer.ora;"
 
-#DEBUG=TRUE
+DEBUG=TRUE
 
 
 if [[ "$DEBUG" == "TRUE" ]];
@@ -131,24 +131,41 @@ function get_database_host()
    dgmgrl / "show database verbose $DATABASE" | awk '/HostName/{print $NF}' | sed 's/'"'"'//g'
 }
 
+
 function set_master_observer()
 {
 MASTER_OBSERVER_HOST=$(get_master_observer_host)
+
 ACTIVE_TARGET_DB=$(get_active_target_db | tr 'a-z' 'A-Z')
 ACTIVE_TARGET_HOST=$(get_database_host ${ACTIVE_TARGET_DB})
+
 NON_ACTIVE_TARGET_DB=$(get_non_active_target_db | tr 'a-z' 'A-Z')
 NON_ACTIVE_TARGET_HOST=$(get_database_host ${NON_ACTIVE_TARGET_DB})
 
-# If Non-Active Target Database Host exists, this should be location of Master Observer
+RUNNING_OBSERVER_HOST_ARRAY=($(dgmgrl -silent / 'show observer;' | awk -F: '/Host Name/{gsub(/ /,""); print $2}'))
+
+# If Non-Active Target Database Host exists and has a Running Observer, this should be location of Master Observer
 if [[ ! -z "${NON_ACTIVE_TARGET_DB}"
-   && "${MASTER_OBSERVER_HOST}" != "${NON_ACTIVE_TARGET_HOST}" ]];
+   && "${MASTER_OBSERVER_HOST}" != "${NON_ACTIVE_TARGET_HOST}" 
+   && " ${RUNNING_OBSERVER_HOST_ARRAY[*]} " =~ " ${NON_ACTIVE_TARGET_HOST} " ]];
 then
    set_master_observer_host ${NON_ACTIVE_TARGET_HOST}
 fi
 
-# If Non-Active Target Database Host does not exist, Active Target should be location of Master Observer
+# If Non-Active Target Database Host does not exist, Active Target should be location of Master Observer provided Observer is running
 if [[ -z "${NON_ACTIVE_TARGET_DB}"
-   && "${MASTER_OBSERVER_HOST}" != "${ACTIVE_TARGET_HOST}" ]];
+   && "${MASTER_OBSERVER_HOST}" != "${ACTIVE_TARGET_HOST}"
+   && " ${RUNNING_OBSERVER_HOST_ARRAY[*]} " =~ " ${ACTIVE_TARGET_HOST} " ]];
+then
+   set_master_observer_host ${ACTIVE_TARGET_HOST}
+fi
+
+# If Non-Active Target Database Host exists but does NOT have a Running Observer,
+# but an Observer exists on the Active Target Host, then make this the Master Observer 
+if [[ ! -z "${NON_ACTIVE_TARGET_DB}"
+   && "${MASTER_OBSERVER_HOST}" != "${NON_ACTIVE_TARGET_HOST}" 
+   && ! " ${RUNNING_OBSERVER_HOST_ARRAY[*]} " =~ " ${NON_ACTIVE_TARGET_HOST} " 
+   && " ${RUNNING_OBSERVER_HOST_ARRAY[*]} " =~ " ${ACTIVE_TARGET_HOST} " ]];
 then
    set_master_observer_host ${ACTIVE_TARGET_HOST}
 fi
