@@ -169,6 +169,8 @@ if [[ ! -z "${NON_ACTIVE_TARGET_DB}"
 then
    set_master_observer_host ${ACTIVE_TARGET_HOST}
 fi
+# Add short delay for the ping times to adjust to the new master observer
+sleep 5
 }
 
 function stop_named_observer()
