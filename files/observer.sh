@@ -97,6 +97,33 @@ PREFERRED_ACTIVE_TARGET_DATABASE=$(get_preferred_active_target_database)
 echo "${PREFERRED_ACTIVE_TARGET_DATABASE}" | grep -ic "^${ORACLE_SID}$"
 }
 
+function try_swap_active_target()
+{
+PREFERRED_ACTIVE_TARGET_DATABASE=$1
+echo "Swapping preferred Active Target"
+# This is the host where the active target database should be running
+# (We do not attempt changing target from other hosts as we want to ensure the target host is up)
+COUNT=1
+while (( COUNT <= 5 ));
+do
+   echo -ne "."
+   OUTPUT=$(echo "set fast_start failover target to ${PREFERRED_ACTIVE_TARGET_DATABASE};" | dgmgrl /)
+   # Occassionally the swap will fail with ORA-16501 but is retriable.  Retry up to 5 times  
+   # with a short delay between each retry.
+   if [[ "${OUTPUT}" =~ "ORA-16501" ]];
+   then
+      echo "Swap failed at $(date)"
+   else
+      # Allow time for this change to become visibile to all brokers
+      sleep 60
+      return
+   fi
+   COUNT=$((COUNT+1))
+   sleep $((COUNT*10))
+done 
+}
+
+
 function set_preferred_active_target_database()
 {
 ACTIVE_TARGET_DATABASE=$(get_active_target_db)
@@ -112,12 +139,7 @@ then
       READY=$(poll_for_target_readiness ${PREFERRED_ACTIVE_TARGET_DATABASE} | tail -1)
       if [[ "${READY}" != "NOT READY" ]];
       then
-         echo "Swapping preferred Active Target"
-         # This is the host where the active target database should be running
-         # (We do not attempt changing target from other hosts as we want to ensure the target host is up)
-         echo "set fast_start failover target to ${PREFERRED_ACTIVE_TARGET_DATABASE};" | dgmgrl -silent /
-         # Allow time for this change to become visibile to all brokers
-         sleep 60
+         try_swap_active_target ${PREFERRED_ACTIVE_TARGET_DATABASE}
       else
          echo "Preferred Target is not ready - keeping current target"
       fi
