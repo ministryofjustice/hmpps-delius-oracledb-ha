@@ -210,13 +210,13 @@ get_backup_observer_hosts | wc -l
 
 function get_master_observer_host()
 {
-echo -e "show observer;"  | dgmgrl -silent / | grep -A2 -E "Observer \".+\" - Master"  | awk '/Host Name:/{print $NF}'
+echo -e "show observer;"  | dgmgrl -silent / | grep -A2 -E "Observer \".+\".* - Master"  | awk '/Host Name:/{print $NF}'
 }
 
 
 function get_backup_observer_hosts()
 {
-echo -e "show observer;"  | dgmgrl -silent / | grep -A2 -E "Observer \".+\" - Backup"  | awk '/Host Name:/{print $NF}'
+echo -e "show observer;"  | dgmgrl -silent / | grep -A2 -E "Observer \".+\".* - Backup"  | awk '/Host Name:/{print $NF}'
 }
 
 
