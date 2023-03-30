@@ -119,7 +119,7 @@ do
       return
    fi
    COUNT=$((COUNT+1))
-   sleep $((COUNT*10))
+   sleep $((COUNT*60))
 done 
 }
 
