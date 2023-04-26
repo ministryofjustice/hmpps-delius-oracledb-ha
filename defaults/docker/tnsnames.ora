@@ -1,8 +1,0 @@
-DNDA =
-  (DESCRIPTION =
-    (ADDRESS = (PROTOCOL = TCP)(HOST = 192.168.56.1)(PORT = 1604))
-    (CONNECT_DATA =
-      (SERVER = DEDICATED)
-      (SERVICE_NAME = DNDA)
-    )
-  )

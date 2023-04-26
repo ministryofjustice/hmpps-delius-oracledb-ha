@@ -1,5 +1,8 @@
 FROM oraclelinux:7-slim
 
+ENV ORACLE_BASE=/u01/app/oracle
+ENV ORACLE_HOME=${ORACLE_BASE}/product/19.0.0.0/client
+
 RUN groupadd oinstall
 
 RUN useradd oracle -g oinstall
@@ -8,9 +11,9 @@ RUN chown -R oracle:oinstall /home/oracle && \
     usermod -d /home/oracle oracle && \
     usermod -s /bin/bash oracle
 
-RUN yum install -y binutils compat-libcap1 compat-libstdc++-33 compat-libstdc++ gcc gcc-c++ glibc glibc-devel ksh libaio libaio-devel libgcc libstc++ libstc++-devel libXi libXtst make sysstat unzip vi
+RUN yum install -y binutils compat-libcap1 compat-libstdc++-33 compat-libstdc++ gcc gcc-c++ glibc glibc-devel ksh libaio libaio-devel libgcc libstc++ libstc++-devel libXi libXtst make sysstat unzip vi awscli jq
 
-RUN mkdir -p /u01/app/oracle/product/19.0.0.0/client && \
+RUN mkdir -p ${ORACLE_HOME} && \
     mkdir -p /u01/software/19c && \
     chown -R oracle:oinstall /u01
 
@@ -24,7 +27,8 @@ RUN unzip LINUX.X64_193000_client.zip
 
 WORKDIR /home/oracle
 
-RUN echo "export ORACLE_HOME=/u01/app/oracle/product/19.0.0.0/client" > .bash_profile
+RUN echo "export ORACLE_BASE=${ORACLE_BASE}" >> .bash_profile
+RUN echo "export ORACLE_HOME=${ORACLE_HOME}" > .bash_profile
 RUN echo "export PATH=\$PATH:\$ORACLE_HOME/bin" >> .bash_profile
 RUN echo "export LD_LIBRARY_PATH=\$ORACLE_HOME/lib:/lib:/usr/lib" >> .bash_profile
 RUN chmod u+x .bash_profile
@@ -46,7 +50,12 @@ RUN /u01/app/oraInventory/orainstRoot.sh
 
 USER oracle:oinstall
 
-COPY tnsnames.ora /u01/app/oracle/product/19.0.0.0/client/network/admin/
+COPY sqlnet.ora ${ORACLE_HOME}/network/admin/
+
+# Prepare Wallet for Data Guard
+RUN mkdir -p ${ORACLE_BASE}/wallets/dg_wallet
+RUN . /home/oracle/.bash_profile && \
+    orapki wallet create -wallet ${ORACLE_BASE}/wallets/dg_wallet -auto_login_only
 
 WORKDIR /home/oracle
 
