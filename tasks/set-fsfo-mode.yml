@@ -20,6 +20,7 @@
         register: config_standby1
         changed_when: false
 
+      # We require no data guard lag if enabling FSFO (irrelevant if disabling FSFO)
       - name: Wait for Data Guard Lag on Standby 1 to Drop to Zero
         shell: |
                . ~/.bash_profile
@@ -28,6 +29,7 @@
         when: 
            - high_availability_count | int >= 1
            - config_standby1 is search('.*Physical standby database.*')
+           - not (fsfo_mode | default('disabled') | lower in ['observe','observer','disable','disabled'])
         changed_when: false
         until: apply_lag.stdout == '0'
         delay: 60
@@ -44,6 +46,7 @@
         when: 
            - high_availability_count | int == 2
 
+      # We require no data guard lag if enabling FSFO (irrelevant if disabling FSFO)
       - name: Wait for Data Guard Lag on Standby 2 to Drop to Zero
         shell: |
                . ~/.bash_profile
@@ -53,6 +56,7 @@
         when: 
            - high_availability_count | int == 2
            - config_standby2 is search('.*Physical standby database.*')
+           - not (fsfo_mode | default('disabled') | lower in ['observe','observer','disable','disabled'])
         until: apply_lag.stdout == '0'
         delay: 60
         retries: 60
@@ -65,8 +69,8 @@
         delegate_to: "{{ delegation_host }}"
         when:
             - ( get_fast_start_failover.stdout | trim ) != 'Disabled'
-            - ( (get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | default('disabled') | lower == 'enabled') )
-              or ( (not get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | default('disabled') | lower in ['observe','observer']) )
+            - ( (get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | default('disabled') | lower in ['enable','enabled','disable','disabled']) )
+              or ( (not get_fast_start_failover.stdout is search("Observe-Only Mode")) and (fsfo_mode | default('disabled') | lower in ['observe','observer','disable','disabled']) )
         retries: 3
         delay: 60
 
