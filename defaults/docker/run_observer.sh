@@ -2,6 +2,15 @@
 
 . /home/oracle/.bash_profile
 
+LOCKFILE="/home/oracle/run_observer.lock"
+
+# Check if the lock file is already locked by another instance
+exec 200>"${LOCKFILE}"
+if ! flock -n -x 200; then
+  echo "Another instance of this script is already running."
+  exit 1
+fi
+
 DATA_GUARD_WALLET=${ORACLE_BASE}/wallets/dg_wallet
 
 # Populate the TNSNAMES.ora file
@@ -13,6 +22,7 @@ echo ${STANDBYDB2_TNS} >> ${ORACLE_HOME}/network/admin/tnsnames.ora
 PRIMARYDB=$(echo ${PRIMARYDB_TNS} | awk -F= '{print $1}')
 STANDBYDB1=$(echo ${STANDBYDB1_TNS} | awk -F= '{print $1}')
 STANDBYDB2=$(echo ${STANDBYDB2_TNS} | awk -F= '{print $1}')
+
 
 function get_sys_password()
 {
@@ -50,9 +60,30 @@ function start_observer()
 echo -e "start observer dg_observer in background file is ${HOME}/fsfo.dat logfile is ${HOME}/observer.log connect identifier is ${PRIMARYDB};" | dgmgrl /@${PRIMARYDB}
 }
 
+function wait_for_observer_to_stop()
+{
+# Sometimes it can take a little while for the observer to stop, so allow a few retries
+COUNT=0
+MAXTRIES=10
+WAITSECS=60
+NUMOBSERVERS=$(echo -e "show observer;" | dgmgrl -silent /@${PRIMARYDB} | grep -Ec "Host Name:\s+${HOSTNAME}$")
+while [[ $NUMOBSERVERS -gt 0 ]];
+do
+   COUNT=$((COUNT+1))
+   if [[ COUNT > MAXTRIES ]];
+   then
+      echo "Cannot stop the observer"
+      exit 1
+   fi
+   sleep ${WAITSECS}
+   NUMOBSERVERS=$(echo -e "show observer;" | dgmgrl -silent /@${PRIMARYDB} | grep -Ec "Host Name:\s+${HOSTNAME}$")
+done
+}
+
 function stop_observer()
 {
 echo -e "stop observer all;" | dgmgrl /@${PRIMARYDB}
+wait_for_observer_to_stop
 }
 
 get_sys_password
@@ -62,7 +93,6 @@ start_observer
 
 echo
 ps -ef | grep -i dg_observer | grep -v grep
-echo
 
 # Poll for Password Changes
 while true;
@@ -71,9 +101,9 @@ do
    if [[ "${ORA}" == "ORA-01017" || "${ORA}" == "ORA-28000" ]];
    then
      echo "Password error detected; updating password wallet"
-     stop_observer
      get_sys_password
      update_dg_wallet
+     stop_observer
      start_observer
    fi
    sleep 60
