@@ -13,6 +13,8 @@
                . ~/.bash_profile
                dgmgrl / "show configuration" | grep "{{ hostvars[groups[ standby1 ][0]]['database_standby_unique'] | lower }}" | cat
         register: config_standby1
+        when: 
+           - standby1 | default('') != ''
         changed_when: false
 
       # We require no data guard lag if enabling FSFO (irrelevant if disabling FSFO)
@@ -22,7 +24,7 @@
                dgmgrl / "show database {{  hostvars[groups[ standby1 ][0]]['database_standby_unique'] | lower }}"  | grep "Apply Lag:" | awk  '{print $3}'
         register: apply_lag
         when: 
-           - high_availability_count | int >= 1
+           - standby1 | default('') != ''
            - config_standby1 is search('.*Physical standby database.*')
            - not (fsfo_mode | default('disabled') | lower in ['observe','observer','disable','disabled'])
         changed_when: false
@@ -39,7 +41,7 @@
         register: config_standby2
         changed_when: false
         when: 
-           - high_availability_count | int == 2
+           - standby2 | default('') != ''
 
       # We require no data guard lag if enabling FSFO (irrelevant if disabling FSFO)
       - name: Wait for Data Guard Lag on Standby 2 to Drop to Zero
@@ -49,7 +51,7 @@
         register: apply_lag
         changed_when: false
         when: 
-           - high_availability_count | int == 2
+           - standby2 | default('') != ''
            - config_standby2 is search('.*Physical standby database.*')
            - not (fsfo_mode | default('disabled') | lower in ['observe','observer','disable','disabled'])
         until: apply_lag.stdout == '0'
