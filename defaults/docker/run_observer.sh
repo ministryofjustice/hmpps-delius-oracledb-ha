@@ -62,6 +62,7 @@ start_observer
 
 echo
 ps -ef | grep -i dg_observer | grep -v grep
+echo
 
 # Poll for Password Changes
 while true;
