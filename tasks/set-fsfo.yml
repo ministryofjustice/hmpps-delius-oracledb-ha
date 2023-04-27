@@ -165,10 +165,6 @@
 
 - debug: var=data_guard_credentials
 
-- name: Initialize Password Update Count
-  set_fact:
-      password_update_count: 0
-
 - name: Update Password in Data Guard Wallet
   include: update_data_guard_wallet_credentials.yml
   vars:
