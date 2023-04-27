@@ -1,7 +1,3 @@
-- name: Enable FSFO Mode
-  when: fsfo_mode | default('disabled') | lower in ['enabled','observe','observer']
-  block:
-
       - name: Get Fast-Start Failover Status
         shell: |
               . ~/.bash_profile
