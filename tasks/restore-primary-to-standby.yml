@@ -55,6 +55,13 @@
       become: true
       become_user: "{{ rdbms_service_user.name }}"
 
+    # Force to start up in read only mode if ADG is specified in hmpps-env-configs.
+    - name: (main/restore-primary-to-standby) Configure database to read only if standby is Active Data Guard
+      shell: |
+            . ~/.bash_profile
+            srvctl modify database -d {{ database_standby_sid }} -startoption "read only"
+      when: active_data_guard | default(false)
+
     - name: (main/restore-primary-to-standby) Copy rman restore bash script to standby
       copy:
         src: "{{ role_path}}/files/rman_duplicate_to_standby.sh"
