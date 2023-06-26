@@ -1,0 +1,17 @@
+- name: Get Fast-Start Failover Status
+  shell: |
+        . ~/.bash_profile
+        dgmgrl -silent / "show configuration;" | awk -F: '/Fast-Start Failover/{print $2}'
+  register: get_fast_start_failover
+  changed_when: false
+
+# Disable Fast Start Failover (Run from Primary)
+- name: Disable Fast Start Failover
+  shell: |
+      . ~/.bash_profile
+      dgmgrl / "disable fast_start failover;"
+  when:
+    - inventory_hostname == groups[ primary ][0]
+    -  ( get_fast_start_failover.stdout | trim ) != 'Disabled'
+  vars:
+          ansible_aws_ssm_timeout: 60
