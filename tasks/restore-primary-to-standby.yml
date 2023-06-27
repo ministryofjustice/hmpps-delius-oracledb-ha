@@ -61,6 +61,8 @@
             . ~/.bash_profile
             srvctl modify database -d {{ database_standby_sid }} -startoption "read only"
       when: active_data_guard | default(false)
+      become: true
+      become_user: "{{ rdbms_service_user.name }}"
 
     - name: (main/restore-primary-to-standby) Copy rman restore bash script to standby
       copy:
