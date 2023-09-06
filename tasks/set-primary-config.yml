@@ -1,6 +1,5 @@
 - name: (main/set-primary-config) Add standby's to primary tnsnames 
   blockinfile:
-    backup:
     insertafter: EOF
     path: '{{ oracle_database_oracle_home }}/network/admin/tnsnames.ora'  
     block: |
