@@ -54,6 +54,7 @@
              srvctl modify database -d {{ database_standby_sid }} -pwfile +DATA/{{ database_standby_sid }}/orapw{{ database_standby_sid }}
       become: true
       become_user: "{{ rdbms_service_user.name }}"
+      ignore_errors: yes
 
     - name: (main/restore-primary-to-standby) Copy rman restore bash script to standby
       copy:
