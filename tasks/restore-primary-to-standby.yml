@@ -66,7 +66,7 @@
     - name: (main/restore-primary-to-standby) Set ssm parameter option if required
       set_fact:
         ssm_parameter_option: "-p {{ ssm_option }}"
-        poll_value: 0 
+        poll_value: 20 
       when: update_ssm_parameter_restore
 
     - name: (main/restore-primary-to-standby) Set use backup flag and RMAN catalog connection if not using Active Duplication
