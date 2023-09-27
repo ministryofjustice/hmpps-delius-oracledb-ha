@@ -66,7 +66,7 @@
     - name: (main/restore-primary-to-standby) Set ssm parameter option if required
       set_fact:
         ssm_parameter_option: "-p {{ ssm_option }}"
-        poll_value: 20 
+        poll_value: 0
       when: update_ssm_parameter_restore
 
     - name: (main/restore-primary-to-standby) Set use backup flag and RMAN catalog connection if not using Active Duplication
@@ -96,30 +96,5 @@
       debug:
         var: restore_result.stdout_lines
         verbosity: 0
-
-    # Force to start up in read only mode if ADG is specified in hmpps-env-configs.
-    - name: Enable Read-Only
-      become: yes
-      become_user: "{{ rdbms_service_user.name }}"
-      when: active_data_guard | default(false)
-      block:
-
-        - name: (main/restore-primary-to-standby) Configure database to read only if standby is Active Data Guard
-          shell: |
-                . ~/.bash_profile
-                srvctl modify database -d {{ database_standby_sid }} -startoption "read only"
-
-        # If in read-only mode we must bounce the database using srvctl for this to take effect.
-        # (The duplicate script uses sqlplus to stop/start the database so we need to use
-        #  srvctl to restart to bring the GI configuration into sync)
-        - name: (main/restore-primary-to-standby) Shutdown if standby is Active Data Guard
-          shell: |
-                . ~/.bash_profile
-                srvctl stop database -d {{ database_standby_sid }}
-                
-        - name: (main/restore-primary-to-standby) Startup if standby is Active Data Guard
-          shell: |
-                . ~/.bash_profile
-                srvctl start database -d {{ database_standby_sid }}
 
   when: inventory_hostname in groups[standby]
