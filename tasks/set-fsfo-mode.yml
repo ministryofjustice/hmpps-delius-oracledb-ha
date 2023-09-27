@@ -33,11 +33,11 @@
         retries: 60
 
       # By Now the Data Guard Lag on the (Optional) 2nd Standby should also have dropped to zero.  But we wait for this too in case it 
-      # is slightly slower
+      # is slightly slower.   This check is skipped if the 2nd Standby is down (ORA-1034).
       - name: Check Standby 2 is in the Data Guard Configuration
         shell: |
                . ~/.bash_profile
-               dgmgrl / "show configuration" | grep "{{ hostvars[groups[ standby2 ][0]]['database_standby_unique'] | lower }}" | cat
+               dgmgrl  / "show configuration;" | grep -EA1 ".* - .*database" --no-group-separator | paste - - | grep -v ORA-1034 | grep "{{ hostvars[groups[ standby2 ][0]]['database_standby_unique'] | lower }}" | cat
         register: config_standby2
         changed_when: false
         when: 
