@@ -159,6 +159,33 @@
 
 - block:
 
+    # Force to start up in read only mode if ADG is specified in hmpps-env-configs.
+    - name: Enable Read-Only
+      become: yes
+      become_user: "{{ rdbms_service_user.name }}"
+      when: 
+         - inventory_hostname in groups[ standby ]
+         - active_data_guard | default(false)
+      block:
+
+        - name: (main) Configure database to read only if standby is Active Data Guard
+          shell: |
+                . ~/.bash_profile
+                srvctl modify database -d {{ database_standby_sid }} -startoption "read only"
+
+        # If in read-only mode we must bounce the database using srvctl for this to take effect.
+        # (The duplicate script uses sqlplus to stop/start the database so we need to use
+        #  srvctl to restart to bring the GI configuration into sync)
+        - name: (main) Shutdown if standby is Active Data Guard
+          shell: |
+                . ~/.bash_profile
+                srvctl stop database -d {{ database_standby_sid }}
+                
+        - name: (main) Startup if standby is Active Data Guard
+          shell: |
+                . ~/.bash_profile
+                srvctl start database -d {{ database_standby_sid }}
+
     - name: (main) Configure Oracle data guard broker
       include: set-primary-dgbroker.yml
       when: inventory_hostname in groups[ primary ]
