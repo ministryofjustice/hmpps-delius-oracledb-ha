@@ -2,7 +2,7 @@
 - name: Get Databases Currently in Configuration
   shell: |
          . ~/.bash_profile
-         dgmgrl  / "show configuration;" | grep -EA1 ".* - .*database" --no-group-separator | paste - - | grep -v ORA-1034 |  awk '/.* - .*database.*/{print $1}'
+         dgmgrl  / "show configuration;" | awk '/ORA-1034/{flag=0}{if(flag==1){print DBNAME;flag=0}}/- .*database/{DBNAME=$1;flag=1}'
   register: get_databases_in_configuration
   delegate_to: "{{ delegation_host }}"
   changed_when: false
