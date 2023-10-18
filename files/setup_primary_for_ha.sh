@@ -82,7 +82,7 @@ EOF
           then
             if '${ACTUAL_VALUE}' is not null
             then          
-              v_sql_stmt:='alter system set ${PARAM_NAME}='||''''||'${ACTUAL_VALUE},${PARAM_VALUE}'||''''||' scope=both';
+              v_sql_stmt:='alter system set ${PARAM_NAME}=''${ACTUAL_VALUE}'',''${PARAM_VALUE}'' scope=both';
             else
               v_sql_stmt:='alter system set ${PARAM_NAME}='||''''||'${PARAM_VALUE}'||''''||' scope=both';
             end if;
