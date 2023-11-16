@@ -159,6 +159,13 @@
 
 - block:
 
+    - name: (main) Configure Oracle data guard broker
+      include: set-primary-dgbroker.yml
+      when: inventory_hostname in groups[ primary ]
+
+    - name: (main) Setup taf service name
+      include: set-taf-service.yml
+
     # Force to start up in read only mode if ADG is specified in hmpps-env-configs.
     - name: Enable Read-Only
       become: yes
@@ -185,13 +192,6 @@
           shell: |
                 . ~/.bash_profile
                 srvctl start database -d {{ database_standby_sid }}
-
-    - name: (main) Configure Oracle data guard broker
-      include: set-primary-dgbroker.yml
-      when: inventory_hostname in groups[ primary ]
-
-    - name: (main) Setup taf service name
-      include: set-taf-service.yml
 
   when: 
      - not fsfo_setup
